@@ -1,0 +1,16 @@
+{
+  "name": "shotmark-js",
+  "private": true,
+  "type": "module",
+  "description": "ShotMark на tinyjs — аннотатор скриншотов (порт Go-версии)",
+  "scripts": {
+    "dev": "tinyjs dev",
+    "build": "tinyjs build",
+    "dev-server": "node tests/dev-server.mjs",
+    "test:backend": "tjs tests/backend.test.js",
+    "test:frontend": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}
