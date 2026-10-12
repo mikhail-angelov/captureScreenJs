@@ -30,23 +30,24 @@ The watcher logic is ported one-to-one: a 500 ms debounce, a size-stability chec
 
 ## Memory (measured)
 
-| part | RSS |
-|---|---|
-| the original Go daemon (macOS) | 6.6 MiB |
-| the JS backend alone, no window (macOS) | 5.7 MiB |
-| the whole app with an empty window (macOS) | ~82 MiB |
+| state | the Go version | this app |
+|---|---|---|
+| idle | 6.6 MiB (the daemon) | ~82 MiB (window kept) or 5.7 MiB (backend only) |
+| editing one screenshot | ~163 MiB (6.6 MiB daemon plus a ~156 MiB Chromium) | 146–155 MiB |
 
-The backend is *lighter* than the Go daemon it replaces; the 82 MiB is the webview
-renderer plus the window. That is what a native window costs, and it replaces an entire
-browser tab — for scale, a blank Chromium instance measured on the development box takes
-~890 MB across 11 processes (an RSS sum, shared pages counted repeatedly).
+With the editor open the two are comparable — the canvas and the decoded image dominate both,
+and this app's webview costs no more than the browser tab did. The backend is *lighter* than the
+Go daemon, so the only real difference is **idle memory**, and all of it is the window plus its
+renderer (76 of the 82 MiB).
 
 Two consequences worth knowing:
 
-- **hiding the window returns nothing** — the renderer stays alive with the page state,
-  which is why showing it again is instant; only *destroying* the window frees the memory;
-- a process that never opens a window stays at backend-level memory, so an app that only
-  needs a window now and then should open it on demand instead of keeping it around.
+- **hiding the window returns nothing** — the renderer stays alive with the page state, which is
+  why showing it again is instant; only *destroying* the window frees the memory;
+- so the memory-optimal shape is a **window on demand**: watch with no window alive, create the
+  editor when a screenshot arrives, destroy it once the work is done — idle memory drops back to
+  backend level. The API allows it (`app.openWindow`, `app.window(id).close`,
+  `onWindowClosed`, `setHideOnClose(false)`, and on macOS the app outlives its last window).
 
 ## Running
 

@@ -61,29 +61,54 @@ release; the binaries were checked against `checksums.txt`.
 
 ## 4. Measured footprint
 
-Measured by the project owner on macOS (the JS build with an empty window):
+Measured by the project owner on macOS:
 
-| part | RSS |
-|---|---|
-| the original Go daemon | 6.6 MiB |
-| the JS backend alone, no window | 5.7 MiB |
-| the whole JS app with an empty window | ~82 MiB |
+| state | the Go version | this app |
+|---|---|---|
+| idle, nothing open | 6.6 MiB (the daemon) | ~82 MiB with the window kept, 5.7 MiB backend-only |
+| **editing one screenshot** | ~163 MiB (6.6 MiB daemon plus ~156 MiB of Chromium) | **146–155 MiB** |
 
-For comparison, on the Linux development box the same logic measured 10.0 MiB (Go daemon)
-and 9.3–9.5 MiB (a plain txiki.js watcher), and a blank Chromium instance took ~890 MB
-across 11 processes (an RSS sum, so shared pages are counted repeatedly).
+On the Linux development box the same logic measured 10.0 MiB (a Go daemon) and 9.3–9.5 MiB
+(a plain txiki.js watcher), and a blank Chromium instance took ~890 MB across 11 processes
+(an RSS sum, so shared pages are counted repeatedly).
 
 Reading:
 
-- the **backend is lighter than the Go daemon it replaces** (5.7 against 6.6 MiB), so the
-  rewrite does not pay for the daemon part at all;
-- the whole 82 MiB is the **window plus the webview renderer** — under 100 MiB for a native
-  GUI, against a browser tab that had to be open before;
+- **with the editor open the JS app is not heavier than the Go one** (146–155 against ~163 MiB):
+  the canvas and the decoded image dominate both, and the webview costs no more than the
+  browser tab it replaces;
+- the **backend is lighter than the Go daemon** (5.7 against 6.6 MiB), so the rewrite does not
+  pay for the daemon part at all;
+- the entire difference is therefore **idle memory**: 82 MiB against 6.6 MiB, and it is the
+  window plus its renderer — 76 MiB, or 93% of the app's footprint;
 - **hiding the window frees nothing** (the renderer keeps the page state, which is what makes
-  showing it instant), so the only way back to backend-level memory is to destroy the window;
-- therefore the memory-optimal shape for a background watcher is: no window until it is
-  needed, open it on a new screenshot and close (destroy) it when the work is done. The
-  current build keeps one window alive, which is the 82 MiB.
+  showing it instant), so `setHideOnClose`, `activation: accessory` and the tray icon save CPU
+  and GPU — not memory. Only destroying the window releases it.
+
+### The shape this points to: a window on demand
+
+Keep the backend watching with no window alive, create the editor window when a screenshot
+arrives and destroy it once the work is done (copy, save, or the user closing it). Then the
+idle state — the entire problem — sits at backend memory (~5.7 MiB), and the app matches or
+beats the Go version in both states.
+
+The API supports exactly this; checked in the vendor documentation shipped with the runtime
+(v0.50.1):
+
+- `export function onWindowClosed(id, app)` — the backend learns the window is gone;
+- `app.openWindow(id, { page, size, chrome, … })` and `app.window(id).close()` — the backend
+  creates and destroys windows (a page may only open files inside the frontend dir);
+- `setHideOnClose(false)` — closing really closes instead of hiding;
+- on macOS the app outlives its last window (the Dock brings it back); on Windows and Linux
+  that holds only while something can bring the app back — a tray icon or accessory mode, both
+  of which this app has;
+- hidden and occluded windows are throttled (rAF stops), so the watcher must live in the
+  backend — it already does;
+- the price is window startup (a fresh renderer must boot) instead of an instant show, and the
+  vendor docs advise pooling windows when they are cycled rapidly.
+
+Not measured yet: whether destroying the window really returns the app to backend-level memory,
+and how long a fresh window takes to appear (section 5).
 
 ## 5. What has NOT been verified (honestly)
 
@@ -97,8 +122,8 @@ no `libwebkit2gtk`):
   folder (if it does not, the base64 fallback still works, at the cost of traffic);
 - the behaviour with the window closed (watching is supposed to continue);
 - the release workflow (it needs a real tag to run);
-- whether the ~82 MiB can be brought down by destroying the window and opening it on demand
-  (the design in section 4) — needs a measurement on macOS.
+- whether destroying the window really returns the app to backend-level memory, and how long a
+  fresh window takes to appear (the design in section 4) — needs a measurement on macOS.
 
 ## 6. Runtime gotchas found
 
