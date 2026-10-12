@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ShotMark</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="app-shell.css">
+</head>
+<body>
+<div id="app">
+  <!-- Folder bar: папка наблюдения, автозапуск, выход (порт на tinyjs) -->
+  <div id="folder-bar">
+    <span id="folder-label">—</span>
+    <button class="toolbar-btn" id="btn-choose-folder" title="Выбрать папку наблюдения">Папка…</button>
+    <button class="toolbar-btn" id="btn-reveal-folder" title="Показать папку в Finder">Finder</button>
+    <label class="login-wrap" id="login-wrap" title="Запускать при входе в систему">
+      <input type="checkbox" id="chk-login"> Автозапуск
+    </label>
+    <button class="toolbar-btn" id="btn-quit" title="Выйти из ShotMark">Выход</button>
+  </div>
+  <!-- Top Toolbar -->
+  <div id="toolbar">
+    <div class="toolbar-left">
+      <button class="toolbar-btn" id="btn-copy" title="Copy (Cmd+C)">Copy</button>
+      <button class="toolbar-btn" id="btn-save" title="Save (Cmd+S)">Save</button>
+    </div>
+    <div class="toolbar-center">
+      <button class="toolbar-btn tool-btn" data-tool="arrow" title="Arrow">➡ Arrows</button>
+      <button class="toolbar-btn tool-btn" data-tool="text" title="Text">T Text</button>
+      <button class="toolbar-btn tool-btn" data-tool="shape" title="Shapes">◻ Shapes</button>
+      <button class="toolbar-btn tool-btn" data-tool="marker" title="Marker">🖍 Marker</button>
+      <button class="toolbar-btn tool-btn" data-tool="blur" title="Blur">◐ Blur</button>
+      <button class="toolbar-btn tool-btn" data-tool="crop" title="Crop">✂ Crop</button>
+    </div>
+    <div class="toolbar-right">
+      <button class="toolbar-btn" id="btn-undo" title="Undo (Cmd+Z)">↩ Undo</button>
+      <button class="toolbar-btn" id="btn-redo" title="Redo (Cmd+Shift+Z)">↪ Redo</button>
+      <select id="zoom-select">
+        <option value="0.5">50%</option>
+        <option value="0.75">75%</option>
+        <option value="1" selected>100%</option>
+        <option value="1.25">125%</option>
+        <option value="1.5">150%</option>
+        <option value="2">200%</option>
+        <option value="fit">Fit</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Tool Options Bar -->
+  <div id="options-bar">
+    <!-- Arrow options -->
+    <div class="tool-options" data-tool="arrow">
+      <label>Style:
+        <select id="arrow-style">
+          <option value="solid">Solid</option>
+          <option value="dashed">Dashed</option>
+        </select>
+      </label>
+      <label>Width:
+        <input type="range" id="arrow-width" min="2" max="20" value="4">
+        <span id="arrow-width-val">4</span>
+      </label>
+      <label>Color:
+        <div class="color-palette" id="arrow-color-palette">
+          <button class="color-swatch" style="background:#ff0000" data-color="#ff0000"></button>
+          <button class="color-swatch" style="background:#00aa00" data-color="#00aa00"></button>
+          <button class="color-swatch" style="background:#0000ff" data-color="#0000ff"></button>
+          <button class="color-swatch" style="background:#ff8800" data-color="#ff8800"></button>
+          <button class="color-swatch" style="background:#ff00ff" data-color="#ff00ff"></button>
+          <button class="color-swatch" style="background:#000000" data-color="#000000"></button>
+          <button class="color-swatch active" style="background:#ff0000" data-color="#ff0000"></button>
+          <input type="color" id="arrow-color-picker" value="#ff0000">
+        </div>
+      </label>
+    </div>
+
+    <!-- Text options -->
+    <div class="tool-options" data-tool="text" style="display:none">
+      <label>Font Size:
+        <input type="range" id="text-size" min="12" max="72" value="24">
+        <span id="text-size-val">24</span>
+      </label>
+      <label>Color:
+        <div class="color-palette">
+          <button class="color-swatch" style="background:#ff0000" data-color="#ff0000"></button>
+          <button class="color-swatch" style="background:#ffffff" data-color="#ffffff"></button>
+          <button class="color-swatch active" style="background:#000000" data-color="#000000"></button>
+          <input type="color" id="text-color-picker" value="#000000">
+        </div>
+      </label>
+      <label>
+        <input type="checkbox" id="text-bold"> Bold
+      </label>
+      <label>
+        <input type="checkbox" id="text-background"> Background
+      </label>
+    </div>
+
+    <!-- Shape options -->
+    <div class="tool-options" data-tool="shape" style="display:none">
+      <label>Shape:
+        <select id="shape-type">
+	          <option value="rectangle">Rectangle</option>
+	          <option value="rounded-rect" selected>Rounded Rect</option>
+          <option value="ellipse">Ellipse</option>
+          <option value="line">Line</option>
+        </select>
+      </label>
+      <label>Stroke Width:
+        <input type="range" id="shape-stroke" min="1" max="16" value="6">
+        <span id="shape-stroke-val">6</span>
+      </label>
+      <label>Color:
+        <div class="color-palette">
+          <button class="color-swatch active" style="background:#ff0000" data-color="#ff0000"></button>
+          <button class="color-swatch" style="background:#00aa00" data-color="#00aa00"></button>
+          <button class="color-swatch" style="background:#0000ff" data-color="#0000ff"></button>
+          <button class="color-swatch" style="background:#000000" data-color="#000000"></button>
+          <input type="color" id="shape-color-picker" value="#ff0000">
+        </div>
+      </label>
+      <label>Fill:
+        <select id="shape-fill">
+          <option value="transparent">Transparent</option>
+          <option value="solid">Solid</option>
+        </select>
+      </label>
+    </div>
+
+    <!-- Marker options -->
+    <div class="tool-options" data-tool="marker" style="display:none">
+      <label>Width:
+        <input type="range" id="marker-width" min="4" max="40" value="18">
+        <span id="marker-width-val">18</span>
+      </label>
+      <label>Opacity:
+        <input type="range" id="marker-opacity" min="0.1" max="1" step="0.05" value="0.45">
+        <span id="marker-opacity-val">0.45</span>
+      </label>
+      <label>Color:
+        <div class="color-palette">
+          <button class="color-swatch active" style="background:#ffff00" data-color="#ffff00"></button>
+          <button class="color-swatch" style="background:#ff8800" data-color="#ff8800"></button>
+          <button class="color-swatch" style="background:#ff00ff" data-color="#ff00ff"></button>
+          <button class="color-swatch" style="background:#00ff00" data-color="#00ff00"></button>
+          <button class="color-swatch" style="background:#00ffff" data-color="#00ffff"></button>
+          <input type="color" id="marker-color-picker" value="#ffff00">
+        </div>
+      </label>
+    </div>
+
+    <!-- Blur options -->
+    <div class="tool-options" data-tool="blur" style="display:none">
+      <label>Blur Radius:
+        <input type="range" id="blur-radius" min="2" max="40" value="12">
+        <span id="blur-radius-val">12</span>
+      </label>
+      <span class="tool-hint">Drag a rectangle to blur</span>
+    </div>
+
+    <!-- Crop options -->
+    <div class="tool-options" data-tool="crop" style="display:none">
+      <button class="options-btn" id="crop-apply">✓ Apply</button>
+      <button class="options-btn" id="crop-cancel">✕ Cancel</button>
+      <button class="options-btn" id="crop-reset">↺ Reset</button>
+      <span class="tool-hint">Drag to select crop area</span>
+    </div>
+  </div>
+
+	  <!-- Workspace -->
+	  <div id="workspace">
+	    <div id="image-frame">
+	      <canvas id="image-canvas"></canvas>
+	      <svg id="annotation-layer"></svg>
+      <svg id="selection-layer"></svg>
+      <div id="text-editor-layer"></div>
+    </div>
+    <div id="empty-state">
+	      <h2>ShotMark</h2>
+	      <p>Waiting for screenshots...</p>
+	      <p class="hint">Take a screenshot with Cmd+Shift+3 or Cmd+Shift+4</p>
+	    </div>
+	  </div>
+	  <footer id="footer-bar">
+	    <a class="footer-github" href="https://github.com/mikhail-angelov/captureScreen" target="_blank" rel="noopener noreferrer" title="GitHub repository">
+	      <svg viewBox="0 0 16 16" aria-hidden="true">
+	        <path d="M8 0.2C3.7 0.2 0.2 3.7 0.2 8c0 3.4 2.2 6.3 5.3 7.4 0.4 0.1 0.5-0.2 0.5-0.4v-1.5c-2.2 0.5-2.6-0.9-2.6-0.9-0.4-0.9-0.9-1.1-0.9-1.1-0.7-0.5 0.1-0.5 0.1-0.5 0.8 0.1 1.2 0.8 1.2 0.8 0.7 1.2 1.9 0.9 2.3 0.7 0.1-0.5 0.3-0.9 0.5-1.1-1.7-0.2-3.5-0.9-3.5-3.9 0-0.9 0.3-1.6 0.8-2.1-0.1-0.2-0.4-1 0.1-2.1 0 0 0.7-0.2 2.2 0.8 0.6-0.2 1.3-0.3 2-0.3s1.4 0.1 2 0.3c1.5-1 2.2-0.8 2.2-0.8 0.4 1.1 0.2 1.9 0.1 2.1 0.5 0.6 0.8 1.3 0.8 2.1 0 3-1.8 3.7-3.5 3.9 0.3 0.2 0.5 0.7 0.5 1.4V15c0 0.2 0.1 0.5 0.5 0.4 3.1-1 5.3-3.9 5.3-7.4C15.8 3.7 12.3 0.2 8 0.2z"/>
+	      </svg>
+	      GitHub
+	    </a>
+	    <span>© Mikhail Angelov</span>
+	    <span>⌘S Save</span>
+	    <span>⌘C Copy</span>
+	    <span>⌘Z Undo</span>
+	    <span>⇧⌘Z Redo</span>
+	    <span>⌘/Ctrl Wheel Zoom</span>
+	  </footer>
+	</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

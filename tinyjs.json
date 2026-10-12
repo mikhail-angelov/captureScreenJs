@@ -1,0 +1,9 @@
+{
+  "name": "shotmark",
+  "title": "ShotMark",
+  "id": "com.mikhailangelov.shotmark",
+  "version": "1.0.0",
+  "size": "1180x820",
+  "readAccess": true,
+  "minTinyjsVersion": "0.50.0"
+}

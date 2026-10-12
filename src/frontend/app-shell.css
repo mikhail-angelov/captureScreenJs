@@ -1,0 +1,46 @@
+/* Оболочка приложения ShotMark (порт на tinyjs):
+   полоса с папкой наблюдения, автозапуском и выходом. */
+
+#folder-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #f6f7f9;
+  border-bottom: 1px solid #e2e5ea;
+  font-size: 12px;
+  color: #444;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#folder-bar #folder-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #2b2f36;
+}
+
+#folder-bar #folder-label.bad { color: #b3261e; }
+
+#folder-bar .login-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+#folder-bar .toolbar-btn {
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+/* В браузерном режиме (отладка/тесты) подсказываем, что это не приложение. */
+#folder-bar.dev { background: #fff8e1; border-bottom-color: #f0dfa0; }
+
+body.dark #folder-bar { background: #23262b; border-bottom-color: #33373d; color: #c9ced6; }
+body.dark #folder-bar #folder-label { color: #e6e9ee; }
+body.dark #folder-bar.dev { background: #3a3524; border-bottom-color: #5a5231; }
