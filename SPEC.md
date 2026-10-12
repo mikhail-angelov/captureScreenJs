@@ -55,11 +55,39 @@ release; the binaries were checked against `checksums.txt`.
 - **Backend method names** checked against the runtime source (`runtime/tiny.js`):
   `setHideOnClose`, `hotkey.register`, `tray.set`, `launchAtLogin`, `store`, `shell`,
   `clipboard`, `notify`, `show`, `quit`, `push` all exist.
+- **CI on GitHub Actions** (ubuntu runner): the `CI` workflow is green — backend tests,
+  Playwright tests, `tinyjs build` and the bundle assertion all pass.
 - **Syntax** of all modules (`node --check`) and the validity of `tinyjs.json`.
 
-## 4. What has NOT been verified (honestly)
+## 4. Measured footprint
 
-These need macOS with the system WebKit — this Mini-PC cannot bring a window up (no display,
+Measured by the project owner on macOS (the JS build with an empty window):
+
+| part | RSS |
+|---|---|
+| the original Go daemon | 6.6 MiB |
+| the JS backend alone, no window | 5.7 MiB |
+| the whole JS app with an empty window | ~82 MiB |
+
+For comparison, on the Linux development box the same logic measured 10.0 MiB (Go daemon)
+and 9.3–9.5 MiB (a plain txiki.js watcher), and a blank Chromium instance took ~890 MB
+across 11 processes (an RSS sum, so shared pages are counted repeatedly).
+
+Reading:
+
+- the **backend is lighter than the Go daemon it replaces** (5.7 against 6.6 MiB), so the
+  rewrite does not pay for the daemon part at all;
+- the whole 82 MiB is the **window plus the webview renderer** — under 100 MiB for a native
+  GUI, against a browser tab that had to be open before;
+- **hiding the window frees nothing** (the renderer keeps the page state, which is what makes
+  showing it instant), so the only way back to backend-level memory is to destroy the window;
+- therefore the memory-optimal shape for a background watcher is: no window until it is
+  needed, open it on a new screenshot and close (destroy) it when the work is done. The
+  current build keeps one window alive, which is the 82 MiB.
+
+## 5. What has NOT been verified (honestly)
+
+These need macOS with the system WebKit — the Mini-PC cannot bring a window up (no display,
 no `libwebkit2gtk`):
 
 - launching the window with `tinyjs dev` and building the `.app` on macOS;
@@ -67,9 +95,12 @@ no `libwebkit2gtk`):
   `clipboard.write`, `dialog.pickFolder/saveFile`, `launchAtLogin`;
 - that `"readAccess": true` really lets the webview read screenshots from an arbitrary
   folder (if it does not, the base64 fallback still works, at the cost of traffic);
-- the behaviour with the window closed (watching is supposed to continue).
+- the behaviour with the window closed (watching is supposed to continue);
+- the release workflow (it needs a real tag to run);
+- whether the ~82 MiB can be brought down by destroying the window and opening it on demand
+  (the design in section 4) — needs a measurement on macOS.
 
-## 5. Runtime gotchas found
+## 6. Runtime gotchas found
 
 - `tjs.makeTempDir()` / `tjs.makeTempFile()` fail with `EINVAL` in this build for any
   arguments — the temporary path for the clipboard is built by hand in `tjs.tmpDir`.
@@ -80,10 +111,10 @@ no `libwebkit2gtk`):
 - Bytes belong off the wire: the image goes to the page as a path through
   `tiny.fileURL`, not as base64 over the socket (base64 is kept as a fallback).
 
-## 6. Next
+## 7. Next
 
 1. Run `tinyjs dev` on a Mac: the window, the tray, the dialogs, launch at login.
-2. Measure the app's memory with the window open / hidden / closed.
+2. Decide on the window-on-demand shape (section 4) and measure it against the current build.
 3. Signing and notarization: `signIdentity` / `notarize` in `tinyjs.json`, or the
    `TINYJS_SIGN_IDENTITY` and `TINYJS_NOTARY_PROFILE` secrets in CI.
 4. Optional: `captureScreen()` to take screenshots itself instead of depending on a folder

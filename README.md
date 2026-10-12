@@ -28,6 +28,26 @@ The watcher logic is ported one-to-one: a 500 ms debounce, a size-stability chec
 (200 ms), processed-file dedupe, the "file strictly inside the folder" guard and the
 `.png/.jpg/.jpeg` extensions.
 
+## Memory (measured)
+
+| part | RSS |
+|---|---|
+| the original Go daemon (macOS) | 6.6 MiB |
+| the JS backend alone, no window (macOS) | 5.7 MiB |
+| the whole app with an empty window (macOS) | ~82 MiB |
+
+The backend is *lighter* than the Go daemon it replaces; the 82 MiB is the webview
+renderer plus the window. That is what a native window costs, and it replaces an entire
+browser tab — for scale, a blank Chromium instance measured on the development box takes
+~890 MB across 11 processes (an RSS sum, shared pages counted repeatedly).
+
+Two consequences worth knowing:
+
+- **hiding the window returns nothing** — the renderer stays alive with the page state,
+  which is why showing it again is instant; only *destroying* the window frees the memory;
+- a process that never opens a window stays at backend-level memory, so an app that only
+  needs a window now and then should open it on demand instead of keeping it around.
+
 ## Running
 
 ```bash
