@@ -1,14 +1,14 @@
-// Отладочный сервер: отдаёт фронтенд как обычную страницу и отвечает теми же
-// данными, что нативный бэкенд. Нужен, чтобы редактор можно было гонять в
-// браузере (руками и в Playwright) — в приложении HTTP нет вообще.
+// Debug server: serves the frontend as an ordinary web page and answers with the
+// same shapes the native backend does. It exists so the editor can be driven in a
+// browser (by hand and by Playwright) — the app itself has no HTTP at all.
 //
 //     node tests/dev-server.mjs            # http://127.0.0.1:8090
 //     SHOT_FOLDER=~/Documents node tests/dev-server.mjs
 //
-// Это только для отладки и тестов; в приложении используется src/main.js.
+// Debugging and tests only; the app uses src/main.js.
 
 import { createServer } from 'node:http';
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { readdirSync, statSync } from 'node:fs';
 import { join, extname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,15 +62,14 @@ createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   const path = decodeURIComponent(url.pathname);
 
-  // ── данные, аналог tiny.api ──
+  // ── data, the tiny.api equivalent ──
   if (path === '/api/state') {
-    const shots = listShots();
     return json(res, 200, {
       folder: SHOT_FOLDER,
       folderError: null,
       launchAtLogin: 'unsupported',
       lastShot: null,
-      shots,
+      shots: listShots(),
     });
   }
 
@@ -79,7 +78,12 @@ createServer(async (req, res) => {
     if (!name || name.includes('/')) return json(res, 400, { error: 'bad name' });
     try {
       const bytes = await readFile(join(SHOT_FOLDER, name));
-      return json(res, 200, { name, path: join(SHOT_FOLDER, name), dataBase64: bytes.toString('base64'), bytes: bytes.length });
+      return json(res, 200, {
+        name,
+        path: join(SHOT_FOLDER, name),
+        dataBase64: bytes.toString('base64'),
+        bytes: bytes.length,
+      });
     } catch {
       return json(res, 404, { error: 'not found' });
     }
@@ -89,10 +93,10 @@ createServer(async (req, res) => {
     const body = await readBody(req);
     try {
       const st = statSync(String(body.path));
-      if (!st.isDirectory()) return json(res, 200, { ok: false, error: 'не папка: ' + body.path });
+      if (!st.isDirectory()) return json(res, 200, { ok: false, error: 'not a directory: ' + body.path });
       return json(res, 200, { ok: true, folder: body.path, error: null });
     } catch {
-      return json(res, 200, { ok: false, error: 'папка не существует: ' + body.path });
+      return json(res, 200, { ok: false, error: 'folder does not exist: ' + body.path });
     }
   }
 
@@ -107,7 +111,7 @@ createServer(async (req, res) => {
     }
   }
 
-  // ── картинка из папки наблюдения ──
+  // ── the image from the watch folder ──
   if (path.startsWith('/file/')) {
     const name = path.slice('/file/'.length);
     if (name.includes('/')) return json(res, 400, { error: 'bad name' });
@@ -120,7 +124,7 @@ createServer(async (req, res) => {
     }
   }
 
-  // ── статика фронтенда ──
+  // ── frontend assets ──
   const rel = path === '/' ? 'index.html' : normalize(path).replace(/^(\.\.[/\\])+/, '');
   try {
     const buf = await readFile(join(FRONTEND, rel));
@@ -130,5 +134,5 @@ createServer(async (req, res) => {
     res.writeHead(404); return res.end('not found');
   }
 }).listen(PORT, '127.0.0.1', () => {
-  console.log(`ShotMark dev-сервер: http://127.0.0.1:${PORT}/  (папка с картинками: ${SHOT_FOLDER})`);
+  console.log(`ShotMark dev server: http://127.0.0.1:${PORT}/  (screenshots from ${SHOT_FOLDER})`);
 });

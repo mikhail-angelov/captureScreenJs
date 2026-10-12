@@ -1,11 +1,13 @@
-// Watcher — порт server/watcher.go на рантайм txiki.js.
-// Логика сохранена один в один: fsnotify → tjs.watch, дебаунс 500 мс,
-// проверка стабильности размера (200 мс), дедуп обработанных и «файл внутри папки».
+// Watcher — a port of server/watcher.go to the txiki.js runtime.
+// Logic is preserved one-to-one: fsnotify -> tjs.watch, 500 ms debounce,
+// size-stability check (200 ms), processed-file dedupe and the
+// "file must live inside the watched folder" guard.
 //
-// Отличия от Go-версии:
-//  - tjs.watch отдаёт callback либо имя файла (строка), либо объект — принимаем оба вида;
-//  - фильтра создания/записи от ядра нет: те же события отсекаются дедупом и
-//    проверкой расширения/приватности (см. isValidFile).
+// Differences from the Go version:
+//  - tjs.watch hands the callback either a file name (string) or an object —
+//    both shapes are accepted here;
+//  - there is no create/write op filter from the kernel, so those cases are
+//    covered by the dedupe plus the extension/hidden-file check (isValidFile).
 
 export const DEBOUNCE_MS = 500;       // WatcherDebounceDelay
 export const STABLE_CHECK_MS = 200;   // StableCheckInterval
@@ -13,7 +15,7 @@ export const SUPPORTED_EXT = ['.png', '.jpg', '.jpeg'];
 
 const log = (...a) => console.log('[watcher]', ...a);
 
-/** Размер файла в байтах или null. Понимает разные формы ответа tjs.stat. */
+/** File size in bytes or null. Tolerates the different tjs.stat shapes. */
 export function statSize(st) {
   if (st == null) return null;
   if (typeof st === 'number') return st;
@@ -23,7 +25,7 @@ export function statSize(st) {
   return null;
 }
 
-/** Время изменения файла (мс) или 0. Учитывает форму ответа tjs.stat: mtim строкой. */
+/** Modification time in ms, or 0. tjs.stat reports it as `mtim` (a string). */
 export function statMtime(st) {
   if (st == null) return 0;
   if (Array.isArray(st)) return st[11] ?? 0;
@@ -53,7 +55,7 @@ export function isSymlinkStat(st) {
   return false;
 }
 
-/** .png/.jpg/.jpeg и имя не с точки — как isValidFile в Go. */
+/** .png/.jpg/.jpeg and a name that does not start with a dot — isValidFile in Go. */
 export function isValidFile(filePath) {
   const base = String(filePath).split('/').pop();
   if (!base || base.startsWith('.')) return false;
@@ -62,7 +64,7 @@ export function isValidFile(filePath) {
   return SUPPORTED_EXT.includes(base.slice(dot).toLowerCase());
 }
 
-/** Файл строго внутри папки (защита от traversal) — isFileInsideDir. */
+/** The file is strictly inside the folder (traversal guard) — isFileInsideDir. */
 export function isFileInsideDir(filePath, dir) {
   const norm = (p) => {
     const parts = String(p).split('/');
@@ -94,7 +96,7 @@ export class Watcher {
   isHandled(p) { return this.handled.has(p); }
   markHandled(p) { this.handled.add(p); }
 
-  /** Аналог tryStartProcessing: не берём файл дважды. */
+  /** tryStartProcessing: never take the same file twice. */
   tryStartProcessing(p) {
     if (this.handled.has(p) || this.pending.has(p)) return false;
     this.pending.add(p);
@@ -103,7 +105,7 @@ export class Watcher {
 
   clearPending(p) { this.pending.delete(p); }
 
-  /** Два замера размера с интервалом — isFileSizeStable. */
+  /** Two size samples with a delay — isFileSizeStable. */
   async isFileSizeStable(filePath, intervalMs = STABLE_CHECK_MS) {
     let size1;
     try { size1 = statSize(await tjs.stat(filePath)); } catch { return false; }
@@ -119,16 +121,16 @@ export class Watcher {
       await sleep(DEBOUNCE_MS);
       if (this.stopped) return;
       const stable = await this.isFileSizeStable(filePath);
-      if (!stable) { log('файл ещё не дописан, пропускаю:', filePath.split('/').pop()); return; }
+      if (!stable) { log('file is not fully written yet, skipping:', filePath.split('/').pop()); return; }
       this.markHandled(filePath);
-      log('принимаю:', filePath.split('/').pop());
+      log('accepting:', filePath.split('/').pop());
       if (this.onNewFile) this.onNewFile(filePath);
     } finally {
       this.clearPending(filePath);
     }
   }
 
-  /** Событие от tjs.watch: строка (имя) либо объект. */
+  /** Event from tjs.watch: a string (name) or an object. */
   onEvent(a, b) {
     if (this.stopped) return;
     let name = null;
@@ -146,7 +148,7 @@ export class Watcher {
   start() {
     this.stopped = false;
     this.handle = tjs.watch(this.dir, (a, b) => this.onEvent(a, b));
-    log('слежу за папкой:', this.dir);
+    log('watching folder:', this.dir);
     return this.handle;
   }
 
@@ -156,7 +158,7 @@ export class Watcher {
       const h = this.handle;
       if (h && typeof h.close === 'function') h.close();
       else if (h && typeof h.stop === 'function') h.stop();
-    } catch (e) { log('ошибка при остановке:', e.message); }
+    } catch (e) { log('error while stopping:', e.message); }
     this.handle = null;
     this.handled.clear();
     this.pending.clear();

@@ -1,10 +1,11 @@
-// Кодирование в base64 и обратно без внешних зависимостей.
-// Нужно потому, что страница в вебвью не имеет доступа к файлам напрямую
-// (file:// ограничен своей папкой) — картинку ей передаёт бэкенд.
+// base64 helpers, no external dependencies.
+// The page inside the webview cannot read arbitrary files (file:// is limited to
+// its own directory), so the backend can hand the image over as bytes if
+// tiny.fileURL is unavailable.
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
-/** Приводим всё, что вернул tjs.readFile, к Uint8Array. */
+/** Normalise whatever tjs.readFile returned into a Uint8Array. */
 export function toBytes(data) {
   if (data == null) return new Uint8Array(0);
   if (data instanceof Uint8Array) return data;

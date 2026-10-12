@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  TINYJS_VERSION: v0.50.1
+
+jobs:
+  test:
+    name: Tests and build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache the tinyjs release
+        uses: actions/cache@v4
+        with:
+          path: .tinyjs-cli
+          key: tinyjs-${{ runner.os }}-${{ runner.arch }}-${{ env.TINYJS_VERSION }}
+
+      - name: Backend tests (txiki.js runtime)
+        run: npm run test:backend
+
+      - name: Install the Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Frontend tests
+        run: npm run test:frontend
+
+      - name: Build the app bundle
+        run: ./.tinyjs-cli/tinyjs build
+
+      - name: Check the bundle is there
+        run: |
+          set -eu
+          ls -la dist
+          test -x dist/shotmark || { echo "::error::the backend bundle is missing"; exit 1; }
+          test -x dist/launcher || { echo "::error::the launcher is missing"; exit 1; }
+
+      - name: Upload the test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

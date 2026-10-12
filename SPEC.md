@@ -1,82 +1,91 @@
-# SPEC — порт captureScreen на tinyjs
+# SPEC — porting captureScreen to tinyjs
 
-Источник: [mikhail-angelov/captureScreen](https://github.com/mikhail-angelov/captureScreen) (Go 1.26 + браузерный UI).
-Цель репозитория: тот же продукт, но на tinyjs — нативное окно вместо вкладки браузера, бэкенд на JS.
+Source: [mikhail-angelov/captureScreen](https://github.com/mikhail-angelov/captureScreen)
+(Go 1.26 plus a browser UI). This repository is the same product on tinyjs: a native
+window instead of a browser tab and a JavaScript backend.
 
-## 1. Что перенесено
+## 1. What was ported
 
-| Оригинал | Здесь | Статус |
+| Original | Here | Status |
 |---|---|---|
-| `server/watcher.go` (fsnotify, debounce 500 мс, stability 200 мс, дедуп, path guard) | `src/watcher.js` | 1:1, проверено тестами |
-| `server/config.go` (`~`, env, проверка папки, симлинки) | `src/config.js` | 1:1, проверено тестами |
-| `ui/*` (редактор, инструменты, экспорт) | `src/frontend/*` | перенесён; изменены только транспорт и сохранение/буфер |
-| `GET /file/{slug}` | `tiny.fileURL(path)` + `api.readShot`; base64 — запасной путь | заменено |
-| HTTP-сервер `127.0.0.1:8090` | `tiny.api` (сокет) | выброшен |
-| `open http://…?file=` | окно приложения + `app.push('newShot')` | заменено |
-| `server/os_integration.go` (OpenUrl) | `app.show()` / `app.shell.open` | заменено |
-| LaunchAgent + `install.sh` | `app.launchAtLogin` | заменено |
-| `navigator.clipboard` (браузер) | `app.clipboard.write({ image })` | нативно |
-| скачивание браузером | `tiny.dialog.saveFile()` + `api.savePng` | нативно |
+| `server/watcher.go` (fsnotify, 500 ms debounce, 200 ms stability, dedupe, path guard) | `src/watcher.js` | one-to-one, covered by tests |
+| `server/config.go` (`~`, env, folder validation, symlinks) | `src/config.js` | one-to-one, covered by tests |
+| `ui/*` (editor, tools, export) | `src/frontend/*` | moved; only the transport and save/clipboard changed |
+| `GET /file/{slug}` | `tiny.fileURL(path)` plus `api.readShot`; base64 as a fallback | replaced |
+| the HTTP server on `127.0.0.1:8090` | `tiny.api` (socket) | dropped |
+| `open http://…?file=` | the app window plus `app.push('newShot')` | replaced |
+| `server/os_integration.go` (OpenUrl) | `app.show()` / `app.shell.open` | replaced |
+| LaunchAgent plus `install.sh` | `app.launchAtLogin` | replaced |
+| `navigator.clipboard` (browser) | `app.clipboard.write({ image })` | native now |
+| a browser download | `tiny.dialog.saveFile()` plus `api.savePng` | native now |
 
-Добавлено (то, чего в оригинале не было): иконка в строке меню, глобальная клавиша
-`Cmd+Alt+S`, уведомление о новом снимке, работа при закрытом окне, панель папки в окне.
+Added, not present in the original: a menu-bar icon, a global `Cmd+Alt+S` hotkey, a
+notification about a new screenshot, working with the window closed, and a folder bar
+inside the window.
 
-## 2. API бэкенда
+## 2. Backend API
 
-`getState`, `listShots`, `readShot`, `setFolder`, `savePng`, `copyImage`, `reveal`,
-`openFolder`, `getLaunchAtLogin`, `setLaunchAtLogin`, `quit`.
-События странице: `ready`, `newShot`, `openShot`, `newestShot`, `folderChanged`,
+`getState`, `listShots`, `readShot`, `readShotBase64`, `setFolder`, `savePng`, `copyImage`,
+`reveal`, `openFolder`, `getLaunchAtLogin`, `setLaunchAtLogin`, `quit`.
+Events pushed to the page: `ready`, `newShot`, `openShot`, `newestShot`, `folderChanged`,
 `folderInvalid`, `requestFolder`.
 
-Трей: «Показать окно», «Выбрать папку…», «Последний снимок», «Выход».
+Tray menu: “Show Window”, “Choose Folder…”, “Latest Screenshot”, “Quit”.
 
-## 3. Что проверено (и на чём)
+## 3. What has been verified (and how)
 
-Проведено на Linux (мини-ПК), рантайм txiki.js v26.6.0 из релиза tinyjs, бинарник сверен по `checksums.txt`.
+Performed on Linux (a small Mini-PC) with the txiki.js runtime v26.6.0 from the tinyjs
+release; the binaries were checked against `checksums.txt`.
 
-- **Логика бэкенда — 31 проверка, 0 падений** (`tjs tests/backend.test.js`):
-  фильтры расширений и имён; path guard (`../` наружу отклонён); base64 (векторы + round-trip 1024 байта);
-  папка: существует/не существует/файл вместо папки/симлинк; watcher целиком: приём валидного PNG,
-  отсутствие повторной обработки, отказ для `.txt` и скрытых файлов, второй файл принимается.
-- **Страница в браузере (браузерный путь)** — живой Chromium: полоса папки, тулбар,
-  загрузка снимка 1000×600 через `/file/`, пустое состояние.
-- **Страница в режиме приложения** (заглушка `window.tiny`): старт по данным бэкенда,
-  картинка пришла двумя путями — по `tiny.fileURL(path)` (основной, байты по сокету не идут)
-  и через base64-фолбэк (`readShotBase64` → blob-url), в обоих случаях снимок 1000×600
-  загружен в редактор; все 7 обработчиков событий зарегистрированы, событие `newShot`
-  переключило снимок, кнопки Copy и Save вызвали `copyImage` и `savePng` с реальным PNG
-  (префикс `iVBORw0KGgo`), ошибок в консоли нет.
-- **Сборка штатным инструментом**: `tinyjs build` (v0.50.1, бинарники сверены по `checksums.txt`)
-  собрал `dist/shotmark` (backend, 8,3 МБ) и `dist/launcher` (1,2 МБ) без ошибок.
-- **Имена методов бэкенда** сверены по исходнику рантайма (`runtime/tiny.js`): `setHideOnClose`,
-  `hotkey.register`, `tray.set`, `launchAtLogin`, `store`, `shell`, `clipboard`, `notify`,
-  `show`, `quit`, `push` — все существуют.
-- **Синтаксис** всех 22 модулей (`node --check`), валидность `tinyjs.json`.
+- **Backend logic — 31 checks, 0 failures** (`npm run test:backend`): extension and name
+  filters; the path guard (`../` escaping is rejected); base64 (known vectors plus a
+  1024-byte round trip); folder validation (exists / missing / a file instead of a folder /
+  a symlink); the watcher end to end — a valid PNG is accepted, a rewrite is not processed
+  twice, `.txt` and hidden files are refused, a second file is accepted.
+- **The page in a browser** (the HTTP path) — a live Chromium: the folder bar, the toolbar,
+  loading a 1000×600 screenshot through `/file/`, the empty state.
+- **The page in app mode** (a `window.tiny` stub): startup from backend data, the image
+  arriving both ways — through `tiny.fileURL(path)` (the primary path, no bytes over the
+  socket) and through the base64 fallback (`readShotBase64` → a blob URL), the 1000×600
+  screenshot loaded in both cases; all seven event handlers registered; a `newShot` event
+  switching the screenshot; Copy and Save calling `copyImage` and `savePng` with a real PNG
+  (`iVBORw0KGgo` prefix) and no console errors.
+- **A build with the official tooling**: `tinyjs build` (v0.50.1) produced `dist/shotmark`
+  (the backend, 8.3 MB) and `dist/launcher` (1.2 MB) without errors.
+- **Backend method names** checked against the runtime source (`runtime/tiny.js`):
+  `setHideOnClose`, `hotkey.register`, `tray.set`, `launchAtLogin`, `store`, `shell`,
+  `clipboard`, `notify`, `show`, `quit`, `push` all exist.
+- **Syntax** of all modules (`node --check`) and the validity of `tinyjs.json`.
 
-## 4. Что НЕ проверено (честно)
+## 4. What has NOT been verified (honestly)
 
-Проверки требуют macOS с системным WebKit — на мини-ПК окно поднять нечем (нет дисплея и `libwebkit2gtk`):
+These need macOS with the system WebKit — this Mini-PC cannot bring a window up (no display,
+no `libwebkit2gtk`):
 
-- запуск окна `tinyjs dev` и сборка `tinyjs build`;
-- нативные вызовы: `app.show()`, трей, глобальная клавиша, уведомление, `clipboard.write`,
-  `dialog.pickFolder/saveFile`, `launchAtLogin`;
-- что `"readAccess": true` действительно открывает вебвью доступ к снимкам из произвольной
-  папки (на Linux окно не поднять) — если нет, сработает base64-фолбэк, но это дороже по трафику;
-- поведение при закрытом окне (наблюдение должно продолжаться).
+- launching the window with `tinyjs dev` and building the `.app` on macOS;
+- the native calls: `app.show()`, the tray, the global hotkey, notifications,
+  `clipboard.write`, `dialog.pickFolder/saveFile`, `launchAtLogin`;
+- that `"readAccess": true` really lets the webview read screenshots from an arbitrary
+  folder (if it does not, the base64 fallback still works, at the cost of traffic);
+- the behaviour with the window closed (watching is supposed to continue).
 
-## 5. Найденные грабли рантайма
+## 5. Runtime gotchas found
 
-- `tjs.makeTempDir()` / `tjs.makeTempFile()` в этой сборке падают с `EINVAL` при любых
-  аргументах — временный путь для буфера обмена строится вручную в `tjs.tmpDir`.
-- `tjs.stat` отдаёт время изменения как `mtim` (строкой), а не `mtime` — учтено в `statMtime`.
-- `tjs.readDir` возвращает асинхронный итератор, `tjs.readFile` — `Uint8Array`.
-- `tjs.watch(dir, cb)`: callback получает имя файла; объект-хендл имеет `close()`.
+- `tjs.makeTempDir()` / `tjs.makeTempFile()` fail with `EINVAL` in this build for any
+  arguments — the temporary path for the clipboard is built by hand in `tjs.tmpDir`.
+- `tjs.stat` reports the modification time as `mtim` (a string), not `mtime` — handled in
+  `statMtime`.
+- `tjs.readDir` returns an async iterator, `tjs.readFile` returns a `Uint8Array`.
+- `tjs.watch(dir, cb)`: the callback receives a file name; the handle has `close()`.
+- Bytes belong off the wire: the image goes to the page as a path through
+  `tiny.fileURL`, not as base64 over the socket (base64 is kept as a fallback).
 
-## 6. Дальше
+## 6. Next
 
-1. Прогнать `tinyjs dev` на маке: окно, трей, диалоги, автозапуск.
-2. Замерить память приложения в состояниях «окно открыто / скрыто / закрыто».
-3. Подпись и нотаризация: `signIdentity`/`notarize` в `tinyjs.json` или `TINYJS_SIGN_IDENTITY`.
-4. Опционально: `captureScreen()` — снимать экран самим, не завися от папки Яндекс.Диска
-   (потребует разрешения «Запись экрана»); `ocr(path)` — текст со снимка.
-5. Отдельной веткой: лицензия репозитория (сейчас нет).
+1. Run `tinyjs dev` on a Mac: the window, the tray, the dialogs, launch at login.
+2. Measure the app's memory with the window open / hidden / closed.
+3. Signing and notarization: `signIdentity` / `notarize` in `tinyjs.json`, or the
+   `TINYJS_SIGN_IDENTITY` and `TINYJS_NOTARY_PROFILE` secrets in CI.
+4. Optional: `captureScreen()` to take screenshots itself instead of depending on a folder
+   (needs the Screen Recording permission); `ocr(path)` for the text on a screenshot.
+5. A license for the repository (there is none right now).

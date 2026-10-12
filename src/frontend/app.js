@@ -1,8 +1,8 @@
-// ShotMark App — точка входа и связывание с бэкендом.
+// ShotMark App — entry point and backend wiring.
 //
-// В приложении (tinyjs) состояние и картинки приходят от бэкенда через tiny.api,
-// новые снимки — событием newShot. В браузере (отладка/тесты) используется
-// HTTP-фолбэк и параметр ?file=<имя>.
+// In the app (tinyjs) the state and the images come from the backend through
+// tiny.api, and new screenshots arrive as the newShot event. In a browser
+// (debugging and tests) the HTTP fallback plus ?file=<name> are used instead.
 
 import { call, on, inApp, hasDialogs, getFileNameFromQuery, loadScreenshot } from './api.js';
 import { Editor } from './editor.js';
@@ -15,7 +15,7 @@ let state = { folder: null, folderError: null, lastShot: null, launchAtLogin: 'u
 
 document.addEventListener('DOMContentLoaded', async () => {
   editor = new Editor();
-  window.editor = editor;
+  window.editor = editor; // for debugging
 
   wireShell();
   await refreshState();
@@ -23,13 +23,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   await openInitial();
 });
 
-// ───────────────────────── состояние ─────────────────────────
+// ───────────────────────── state ─────────────────────────
 
 async function refreshState() {
   try {
     state = Object.assign(state, await call('getState'));
   } catch (e) {
-    console.warn('не удалось получить состояние:', e.message);
+    console.warn('cannot get the state:', e.message);
   }
   renderShell();
 }
@@ -41,7 +41,7 @@ function renderShell() {
       label.textContent = '⚠ ' + state.folderError;
       label.classList.add('bad');
     } else {
-      label.textContent = state.folder || 'папка не выбрана';
+      label.textContent = state.folder || 'no folder selected';
       label.classList.remove('bad');
     }
   }
@@ -51,7 +51,7 @@ function renderShell() {
     const v = state.launchAtLogin;
     chk.checked = v === 'enabled';
     chk.disabled = v === 'unsupported' || v === 'unknown' || v === 'requires-approval';
-    chk.title = v === 'requires-approval' ? 'Требуется подтверждение в «Объекты входа» (системные настройки)' : '';
+    chk.title = v === 'requires-approval' ? 'Approve ShotMark in System Settings → General → Login Items' : '';
     const wrap = $('login-wrap');
     if (wrap) wrap.style.display = v === 'unsupported' ? 'none' : '';
   }
@@ -62,10 +62,10 @@ function renderShell() {
   }
 }
 
-// ───────────────────────── открытие снимка ─────────────────────────
+// ───────────────────────── opening a screenshot ─────────────────────────
 
 async function openInitial() {
-  // Приоритет: параметр в адресе (отладка/тесты) → последний снимок из бэкенда.
+  // Priority: the query parameter (debug/tests) -> the last screenshot from the backend.
   const fromQuery = getFileNameFromQuery();
   if (fromQuery) { await openShot(fromQuery); return; }
 
@@ -74,7 +74,7 @@ async function openInitial() {
   const newest = Array.isArray(state.shots) && state.shots.length ? state.shots[0].name : null;
   if (newest) { await openShot(newest); return; }
 
-  showEmpty('Ждём скриншоты…', 'Сделайте снимок: Cmd+Shift+3 или Cmd+Shift+4');
+  showEmpty('Waiting for screenshots…', 'Take one with Cmd+Shift+3 or Cmd+Shift+4');
 }
 
 async function openShot(name) {
@@ -84,11 +84,11 @@ async function openShot(name) {
     if (!imageData) return;
     await editor.loadImage(imageData);
     if (state.shots && !state.shots.some((s) => s.name === name)) {
-      // Снимок пришёл от события — обновим список для следующих запусков.
+      // The screenshot came from an event — refresh the list for the next launches.
       call('listShots').then((shots) => { state.shots = shots; }).catch(() => {});
     }
   } catch (e) {
-    showEmpty('Не удалось открыть снимок', e.message);
+    showEmpty('Could not open the screenshot', e.message);
   }
 }
 
@@ -103,7 +103,7 @@ function showEmpty(title, hint) {
   if (frame) frame.classList.remove('has-image');
 }
 
-// ───────────────────────── события от бэкенда ─────────────────────────
+// ───────────────────────── backend events ─────────────────────────
 
 function subscribe() {
   on('ready', (payload) => {
@@ -133,20 +133,20 @@ function subscribe() {
     call('listShots').then((shots) => {
       state.shots = shots;
       if (shots && shots.length) openShot(shots[0].name);
-      else showEmpty('Папка выбрана', folder);
+      else showEmpty('Folder selected', folder);
     }).catch(() => {});
   });
 
   on('folderInvalid', ({ folder, error }) => {
     state.folderError = error;
     renderShell();
-    showEmpty('Папка наблюдения недоступна', `${folder}: ${error}`);
+    showEmpty('Watch folder is unavailable', `${folder}: ${error}`);
   });
 
   on('requestFolder', () => { chooseFolder(); });
 }
 
-// ───────────────────────── оболочка приложения ─────────────────────────
+// ───────────────────────── app shell ─────────────────────────
 
 function wireShell() {
   const choose = $('btn-choose-folder');
@@ -182,7 +182,7 @@ async function chooseFolder() {
   if (hasDialogs()) {
     path = await window.tiny.dialog.pickFolder();
   } else if (DEV) {
-    path = window.prompt('Папка наблюдения (режим отладки):', state.folder || '');
+    path = window.prompt('Watch folder (debug mode):', state.folder || '');
   }
 
   if (!path) return;
@@ -192,9 +192,9 @@ async function chooseFolder() {
     if (res && res.ok === false) {
       state.folderError = res.error;
       renderShell();
-      showEmpty('Папка не подошла', res.error);
+      showEmpty('That folder did not work', res.error);
     }
   } catch (e) {
-    showEmpty('Папка не подошла', e.message);
+    showEmpty('That folder did not work', e.message);
   }
 }

@@ -1,0 +1,2 @@
+# Deliberately empty folder: the frontend tests use it to check the empty state
+# (the second dev server instance, port 8091, watches it).

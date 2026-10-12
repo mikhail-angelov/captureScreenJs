@@ -1,24 +1,24 @@
-// ShotMark — слой связи со «сервером».
+// ShotMark — the page-to-backend layer.
 //
-// Два режима работы одной и той же страницы:
-//   1) внутри tinyjs — window.tiny.api.call(...) : нативный бэкенд, связь по сокету;
-//   2) в обычном браузере (отладка/Playwright) — HTTP-фолбэк на dev-сервер
-//      tests/dev-server.mjs, который отдаёт те же ответы.
+// The very same page runs in two modes:
+//   1) inside tinyjs — window.tiny.api.call(...): the native backend over a socket;
+//   2) in a plain browser (debugging and Playwright) — an HTTP fallback against
+//      tests/dev-server.mjs, which answers with the same shapes.
 //
-// Так редактор остаётся тестируемым в браузере (как в исходном проекте),
-// а в приложении работает без портов и HTTP.
+// This keeps the editor testable without launching the app, while in the app
+// itself there is no port and no HTTP at all.
 
 const HAS_TINY =
   typeof window !== 'undefined' &&
   !!(window.tiny && window.tiny.api && typeof window.tiny.api.call === 'function');
 
-/** Правда, если страница работает внутри tinyjs. */
+/** True when the page runs inside tinyjs. */
 export const inApp = () => HAS_TINY;
 
-/** Есть ли нативные диалоги (нужны для выбора папки и сохранения). */
+/** True when native dialogs are available (folder picking, saving). */
 export const hasDialogs = () => HAS_TINY && !!(window.tiny && window.tiny.dialog);
 
-// ───────────────────────── HTTP-фолбэк (только для отладки и тестов) ─────────────────────────
+// ───────────────────────── HTTP fallback (debugging and tests only) ─────────────────────────
 
 async function httpCall(fn, params = {}) {
   const base = window.location.origin;
@@ -33,7 +33,13 @@ async function httpCall(fn, params = {}) {
     }
     case 'readShot': {
       const r = await fetch(base + '/api/shot?name=' + encodeURIComponent(params.name));
-      if (!r.ok) throw new Error('не удалось прочитать снимок: ' + params.name);
+      if (!r.ok) throw new Error('cannot read screenshot: ' + params.name);
+      const data = await r.json();
+      return { name: data.name, path: data.path, bytes: data.bytes };
+    }
+    case 'readShotBase64': {
+      const r = await fetch(base + '/api/shot?name=' + encodeURIComponent(params.name));
+      if (!r.ok) throw new Error('cannot read screenshot: ' + params.name);
       return r.json();
     }
     case 'setFolder': {
@@ -61,36 +67,36 @@ async function httpCall(fn, params = {}) {
     case 'quit':
       return { ok: true };
     default:
-      throw new Error('в браузерном режиме метод недоступен: ' + fn);
+      throw new Error('method unavailable in the browser mode: ' + fn);
   }
 }
 
 function httpOn() {
-  // В браузерном режиме подписки нет: страница открывается по ?file=<имя>.
+  // No subscriptions in the browser mode: the page is opened with ?file=<name>.
   return () => {};
 }
 
-// ───────────────────────── общий интерфейс ─────────────────────────
+// ───────────────────────── shared interface ─────────────────────────
 
-/** Вызов функции бэкенда. */
+/** Call a backend function. */
 export async function call(fn, params = {}) {
   if (HAS_TINY) return window.tiny.api.call(fn, params);
   return httpCall(fn, params);
 }
 
-/** Подписка на событие от бэкенда (newShot, folderChanged, ready…). */
+/** Subscribe to a backend event (newShot, folderChanged, ready…). */
 export function on(event, cb) {
   if (HAS_TINY) return window.tiny.api.on(event, cb);
   return httpOn(event, cb);
 }
 
-/** Значение из строки запроса (режим отладки: ?file=<имя>). */
+/** Value from the query string (debug mode: ?file=<name>). */
 export function getFileNameFromQuery() {
   const params = new URLSearchParams(window.location.search);
   return params.get('file');
 }
 
-/** base64 → blob-url, который понимает <img> и canvas. */
+/** base64 -> object URL that <img> and canvas can use. */
 export function base64ToObjectUrl(dataBase64, type = 'image/png') {
   const bin = atob(dataBase64);
   const bytes = new Uint8Array(bin.length);
@@ -102,16 +108,17 @@ function loadImageElement(url) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('не удалось загрузить картинку: ' + url));
+    img.onerror = () => reject(new Error('cannot load the image: ' + url));
     img.src = url;
   });
 }
 
 /**
- * Загрузить снимок в редактор.
- * В приложении картинку отдаёт бэкенд: сначала пробуем tiny.fileURL(path) —
- * файл читает сам вебвью (нужен "readAccess" в tinyjs.json, байты не идут по сокету);
- * если fileURL нет — берём байты в base64. В браузере — /file/<имя>.
+ * Load a screenshot into the editor.
+ * In the app the backend answers with a path and the page loads the file itself
+ * through tiny.fileURL(path) — the webview reads it directly ("readAccess" in
+ * tinyjs.json), so no bytes travel over the socket. If fileURL is unavailable the
+ * page falls back to base64 bytes. In a browser the dev server serves /file/<name>.
  */
 export async function loadScreenshot(name) {
   if (!name) return null;
@@ -125,7 +132,7 @@ export async function loadScreenshot(name) {
         const img = await loadImageElement(imageUrl);
         return { fileName: meta.name, imageUrl, img, width: img.naturalWidth, height: img.naturalHeight };
       } catch (e) {
-        console.warn('fileURL не сработал, беру байты:', e.message);
+        console.warn('fileURL did not work, falling back to bytes:', e.message);
       }
     }
 

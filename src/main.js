@@ -1,13 +1,12 @@
-// ShotMark (JS) — бэкенд приложения на рантайме tinyjs.
-// Порт Go-версии (github.com/mikhail-angelov/captureScreen): вместо HTTP-сервера
-// на 127.0.0.1 и вкладки браузера — нативное окно, а связь со страницей идёт
-// через tiny.api (запрос/ответ) и app.push (события).
+// ShotMark (JS) — application backend on the tinyjs runtime.
+// A port of the Go version (github.com/mikhail-angelov/captureScreen): instead of
+// an HTTP server on 127.0.0.1 plus a browser tab, the app runs in a native window
+// and talks to the page through tiny.api (request/response) and app.push (events).
 //
-// Что осталось от оригинала: слежение за папкой скриншотов, дебаунс, дедуп,
-// защита «файл внутри папки», редактор в ui/ (перенесён в src/frontend без изменений).
-// Что появилось: нативное окно, иконка в строке меню, уведомления, глобальная
-// горячая клавиша, нативный буфер обмена, системный диалог сохранения,
-// автозапуск при логине, работа в фоне при закрытом окне.
+// Kept from the original: screenshot folder watching, debounce, dedupe, the
+// "file inside the folder" guard and the editor in ui/ (moved to src/frontend).
+// Added: native window, menu-bar icon, notifications, global hotkey, native
+// clipboard, native save dialog, launch at login, work with the window closed.
 
 import { Watcher, isValidFile, statSize, statMtime } from './watcher.js';
 import { bytesToBase64, base64ToBytes } from './base64.js';
@@ -26,13 +25,13 @@ let watchFolder = '';
 let folderError = null;
 let lastAccepted = null;
 
-// ─────────────────────────── служебное ───────────────────────────
+// ─────────────────────────── helpers ───────────────────────────
 
-/** Список имён в папке: tjs.readDir отдаёт асинхронный итератор либо массив. */
+/** Directory entries: tjs.readDir returns an async iterator or an array. */
 async function readDirNames(dir) {
   const names = [];
   let it;
-  try { it = await tjs.readDir(dir); } catch (e) { log('не читается папка:', e.message); return names; }
+  try { it = await tjs.readDir(dir); } catch (e) { log('cannot read folder:', e.message); return names; }
   const push = (e) => {
     if (typeof e === 'string') names.push(e);
     else if (e && typeof e.name === 'string') names.push(e.name);
@@ -45,7 +44,7 @@ async function readDirNames(dir) {
   return names;
 }
 
-/** Свежие картинки в папке наблюдения (сначала новые). */
+/** Recent screenshots in the watched folder, newest first. */
 async function listShots(limit = 50) {
   const names = await readDirNames(watchFolder);
   const shots = [];
@@ -56,7 +55,6 @@ async function listShots(limit = 50) {
     try { size = statSize(await tjs.stat(full)); } catch { continue; }
     shots.push({ name, size: size ?? 0, path: full });
   }
-  // Свежие сверху: сортируем по времени изменения (tjs.stat отдаёт mtim).
   for (const s of shots) {
     try {
       s.mtime = statMtime(await tjs.stat(s.path));
@@ -67,7 +65,7 @@ async function listShots(limit = 50) {
 }
 
 async function readShotBase64(name) {
-  if (!isSafeName(name) || !isValidFile(name)) throw new Error('недопустимое имя файла: ' + name);
+  if (!isSafeName(name) || !isValidFile(name)) throw new Error('invalid file name: ' + name);
   const full = joinPath(watchFolder, name);
   const bytes = await tjs.readFile(full);
   return { full, bytes, dataBase64: bytesToBase64(bytes) };
@@ -77,7 +75,7 @@ async function switchFolder(dir, app) {
   const res = await resolveWatchFolder(dir);
   if (!res.ok) {
     folderError = res.error;
-    log('папка отклонена:', res.error);
+    log('folder rejected:', res.error);
     if (app) app.push('folderInvalid', { folder: dir, error: res.error });
     return { ok: false, error: res.error, folder: watchFolder };
   }
@@ -87,31 +85,31 @@ async function switchFolder(dir, app) {
   try { app && app.store && app.store.set(STORE_KEY, watchFolder); } catch (e) { log('store:', e.message); }
   watcher = new Watcher(watchFolder, (filePath) => onNewShot(filePath, app));
   watcher.start();
-  log('папка наблюдения:', watchFolder);
+  log('watch folder:', watchFolder);
   if (app) app.push('folderChanged', { folder: watchFolder });
   return { ok: true, folder: watchFolder, error: null };
 }
 
 async function onNewShot(filePath, app) {
   const name = baseName(filePath);
-  log('новый файл:', name);
+  log('new file:', name);
   try {
-    const { dataBase64, bytes } = await readShotBase64(name);
+    const { bytes } = await readShotBase64(name);
     lastAccepted = name;
     if (app) {
-      app.push('newShot', { name, dataBase64, bytes: bytes.byteLength });
+      app.push('newShot', { name, bytes: bytes.byteLength });
       app.show();
-      app.notify({ title: APP_NAME, body: `Открыт снимок: ${name}` });
+      app.notify({ title: APP_NAME, body: `Opened screenshot: ${name}` });
     }
   } catch (e) {
-    log('не смог прочитать снимок:', e.message);
+    log('cannot read the screenshot:', e.message);
   }
 }
 
-// ─────────────────────────── API для страницы ───────────────────────────
+// ─────────────────────────── page-facing API ───────────────────────────
 
 export const api = {
-  /** Состояние приложения для стартовой отрисовки. */
+  /** Application state for the initial render. */
   getState: async (_params, app) => ({
     folder: watchFolder,
     folderError,
@@ -122,41 +120,41 @@ export const api = {
 
   listShots: async () => listShots(50),
 
-  /** Снимок для редактора: страница сама грузит его по tiny.fileURL(path). */
+  /** Screenshot metadata; the page loads the image itself via tiny.fileURL(path). */
   readShot: async ({ name }) => {
-    if (!isSafeName(name) || !isValidFile(name)) throw new Error('недопустимое имя файла: ' + name);
+    if (!isSafeName(name) || !isValidFile(name)) throw new Error('invalid file name: ' + name);
     const full = joinPath(watchFolder, name);
     let size = null;
-    try { size = statSize(await tjs.stat(full)); } catch { /* размер не критичен */ }
+    try { size = statSize(await tjs.stat(full)); } catch { /* size is optional */ }
     return { name, path: full, bytes: size ?? 0 };
   },
 
-  /** Запасной путь: байты картинки в base64, если fileURL недоступен. */
+  /** Fallback: the image bytes in base64, used when fileURL is unavailable. */
   readShotBase64: async ({ name }) => {
     const { dataBase64, bytes, full } = await readShotBase64(name);
     return { name, path: full, dataBase64, bytes: bytes.byteLength };
   },
 
-  /** Выбор папки: страница зовёт tiny.dialog.pickFolder(), путь приходит сюда. */
+  /** Folder picking: the page calls tiny.dialog.pickFolder(), the path lands here. */
   setFolder: async ({ path }, app) => switchFolder(path, app),
 
-  /** Сохранить PNG, собранный в редакторе (путь выбран в native save dialog). */
+  /** Save the PNG rendered by the editor (the path comes from the native dialog). */
   savePng: async ({ path, dataBase64 }) => {
-    if (!path) throw new Error('путь сохранения не задан');
+    if (!path) throw new Error('no save path given');
     const bytes = base64ToBytes(dataBase64);
     await tjs.writeFile(path, bytes);
-    log('сохранено:', path, bytes.byteLength, 'байт');
+    log('saved:', path, bytes.byteLength, 'bytes');
     return { path, bytes: bytes.byteLength };
   },
 
-  /** Скопировать картинку в буфер обмена нативно (NSPasteboard). */
+  /** Copy the image to the clipboard natively (NSPasteboard). */
   copyImage: async ({ dataBase64 }, app) => {
     const bytes = base64ToBytes(dataBase64);
-    // tjs.makeTempFile в текущем рантайме падает с EINVAL, поэтому путь строим сами.
+    // tjs.makeTempFile fails with EINVAL in the current runtime, so build the path here.
     const tmpPath = joinPath(tjs.tmpDir, `shotmark-clipboard-${Date.now()}.png`);
     await tjs.writeFile(tmpPath, bytes);
     await app.clipboard.write({ image: tmpPath });
-    log('скопировано в буфер:', tmpPath);
+    log('copied to clipboard:', tmpPath);
     return { ok: true, path: tmpPath };
   },
 
@@ -178,12 +176,12 @@ export const api = {
   quit: async (_p, app) => { app.quit(); return { ok: true }; },
 };
 
-// ─────────────────────────── запуск ───────────────────────────
+// ─────────────────────────── startup ───────────────────────────
 
 export function init(app) {
-  // Закрытие окна не завершает приложение: наблюдение за папкой продолжается,
-  // окно открывается заново при новом скриншоте. (В Go-версии за это отвечал
-  // отдельный демон + вкладка браузера.)
+  // Closing the window does not quit the app: folder watching continues and the
+  // window comes back on the next screenshot. (In the Go version this was a
+  // separate daemon plus a browser tab.)
   try { app.setHideOnClose(true); } catch (e) { log('setHideOnClose:', e.message); }
 
   const stored = (() => { try { return app.store.get(STORE_KEY); } catch { return null; } })();
@@ -194,10 +192,10 @@ export function init(app) {
       watchFolder = res.path;
       watcher = new Watcher(watchFolder, (filePath) => onNewShot(filePath, app));
       watcher.start();
-      log('папка наблюдения:', watchFolder);
+      log('watch folder:', watchFolder);
     } else {
       folderError = res.error;
-      log('папка по умолчанию не подошла:', res.error);
+      log('default folder did not work:', res.error);
       if (app) app.push('folderInvalid', { folder: initial, error: res.error });
     }
     if (app) {
@@ -210,22 +208,22 @@ export function init(app) {
     }
   });
 
-  // Иконка в строке меню.
+  // Menu-bar icon.
   const trayMenu = [
-    { id: 'show', label: 'Показать окно' },
-    { id: 'folder', label: 'Выбрать папку…' },
-    { id: 'latest', label: 'Последний снимок' },
+    { id: 'show', label: 'Show Window' },
+    { id: 'folder', label: 'Choose Folder…' },
+    { id: 'latest', label: 'Latest Screenshot' },
     { separator: true },
-    { id: 'quit', label: 'Выход' },
+    { id: 'quit', label: 'Quit' },
   ];
   try {
     app.tray.set({ title: APP_NAME, icon: TRAY_ICON, tooltip: APP_NAME, menu: trayMenu });
   } catch (e) {
-    log('tray с иконкой не поднялся, пробую без неё:', e.message);
-    try { app.tray.set({ title: APP_NAME, menu: trayMenu }); } catch (e2) { log('tray недоступен:', e2.message); }
+    log('tray with icon failed, retrying without it:', e.message);
+    try { app.tray.set({ title: APP_NAME, menu: trayMenu }); } catch (e2) { log('tray unavailable:', e2.message); }
   }
 
-  // Глобальная клавиша «показать окно».
+  // Global hotkey to bring the window up.
   try { app.hotkey.register(HOTKEY_ID, SHOW_HOTKEY); } catch (e) { log('hotkey:', e.message); }
 }
 

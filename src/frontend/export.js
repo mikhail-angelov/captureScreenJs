@@ -232,8 +232,8 @@ export class Exporter {
     ctx.restore();
   }
 
-  // Copy final image to clipboard: в приложении — нативно (NSPasteboard),
-  // в браузере — как раньше, через navigator.clipboard.
+  // Copy the final image to the clipboard: natively in the app (NSPasteboard),
+  // through navigator.clipboard in a browser.
   async copyToClipboard() {
     const canvas = this.renderFinalImage();
     if (!canvas) throw new Error('No image to copy');
@@ -255,8 +255,8 @@ export class Exporter {
     }
   }
 
-  // Save final image: в приложении — системный диалог сохранения и запись через
-  // бэкенд; в браузере — как раньше, скачиванием файла.
+  // Save the final image: the native save dialog plus a backend write in the app,
+  // a plain download in a browser.
   async saveToFile() {
     const canvas = this.renderFinalImage();
     if (!canvas) throw new Error('No image to save');
@@ -274,7 +274,7 @@ export class Exporter {
           dest = await window.tiny.dialog.saveFile();
         }
       }
-      if (!dest) return null; // пользователь отменил
+      if (!dest) return null; // the user cancelled
       await call('savePng', { path: dest, dataBase64 });
       return dest;
     }

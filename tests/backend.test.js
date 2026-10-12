@@ -1,8 +1,9 @@
-// Проверки логики бэкенда под рантаймом txiki.js (тот же, что внутри tinyjs):
+// Backend checks under the txiki.js runtime (the same one tinyjs embeds):
 //
-//     tjs tests/backend.test.js
+//     npm run test:backend          # or: tjs tests/backend.test.js
 //
-// Тесты синтетические: файлы создаются во временной папке, приложение не запускается.
+// The tests are synthetic: files are created in a temporary folder and the
+// application itself is never launched.
 
 import { Watcher, isValidFile, isFileInsideDir } from '../src/watcher.js';
 import { resolveWatchFolder, isSafeName, joinPath, expandTilde } from '../src/config.js';
@@ -20,90 +21,90 @@ function eq(name, a, b) { check(name, a === b, { got: a, want: b }); }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Временная папка вручную: tjs.makeTempDir в этом билде рантайма падает с EINVAL. */
+/** Temporary folder built by hand: tjs.makeTempDir fails with EINVAL in this runtime build. */
 async function makeTempDir(prefix) {
   const path = joinPath(tjs.tmpDir, `${prefix}${Date.now()}-${Math.floor(Math.random() * 1e6)}`);
   await tjs.makeDir(path, { recursive: true });
   return path;
 }
 
-// ───────────────────────── 1. фильтры имён и путей ─────────────────────────
+// ───────────────────────── 1. name and path filters ─────────────────────────
 
 function testFilters() {
-  console.log('\n1. фильтры: расширения и «внутри папки»');
-  eq('a.png принят', isValidFile('a.png'), true);
-  eq('A.PNG принят (регистр)', isValidFile('A.PNG'), true);
-  eq('a.jpeg принят', isValidFile('a.jpeg'), true);
-  eq('.скрытый.png отклонён', isValidFile('.скрытый.png'), false);
-  eq('a.txt отклонён', isValidFile('a.txt'), false);
-  eq('файл без расширения отклонён', isValidFile('noext'), false);
+  console.log('\n1. filters: extensions and "inside the folder"');
+  eq('a.png accepted', isValidFile('a.png'), true);
+  eq('A.PNG accepted (case)', isValidFile('A.PNG'), true);
+  eq('a.jpeg accepted', isValidFile('a.jpeg'), true);
+  eq('.hidden.png rejected', isValidFile('.hidden.png'), false);
+  eq('a.txt rejected', isValidFile('a.txt'), false);
+  eq('extension-less file rejected', isValidFile('noext'), false);
 
-  eq('файл внутри папки', isFileInsideDir('/tmp/w/a.png', '/tmp/w'), true);
-  eq('подпапка внутри', isFileInsideDir('/tmp/w/sub/a.png', '/tmp/w'), true);
-  eq('выход наружу отклонён', isFileInsideDir('/tmp/w/../secret.png', '/tmp/w'), false);
-  eq('другая папка отклонена', isFileInsideDir('/tmp/other/a.png', '/tmp/w'), false);
+  eq('file inside the folder', isFileInsideDir('/tmp/w/a.png', '/tmp/w'), true);
+  eq('nested file inside', isFileInsideDir('/tmp/w/sub/a.png', '/tmp/w'), true);
+  eq('escaping upwards rejected', isFileInsideDir('/tmp/w/../secret.png', '/tmp/w'), false);
+  eq('another folder rejected', isFileInsideDir('/tmp/other/a.png', '/tmp/w'), false);
 
-  eq('имя с косой чертой отклонено', isSafeName('sub/a.png'), false);
-  eq('обычное имя принято', isSafeName('Снимок экрана.png'), true);
-  eq('~ разворачивается в домашний каталог', expandTilde('~/Documents'), tjs.homeDir + '/Documents');
-  eq('склейка пути', joinPath('/tmp/w/', 'a.png'), '/tmp/w/a.png');
+  eq('name with a slash rejected', isSafeName('sub/a.png'), false);
+  eq('plain name accepted', isSafeName('Screenshot 2026-10-12 at 07.40.00.png'), true);
+  eq('~ expands to the home directory', expandTilde('~/Documents'), tjs.homeDir + '/Documents');
+  eq('path joining', joinPath('/tmp/w/', 'a.png'), '/tmp/w/a.png');
 }
 
 // ───────────────────────── 2. base64 ─────────────────────────
 
 function testBase64() {
-  console.log('\n2. base64 (передача картинки странице)');
-  eq('известный вектор', bytesToBase64(new TextEncoder().encode('hello')), 'aGVsbG8=');
-  eq('вектор «f»', bytesToBase64(new TextEncoder().encode('f')), 'Zg==');
-  eq('вектор «fo»', bytesToBase64(new TextEncoder().encode('fo')), 'Zm8=');
-  eq('вектор «foo»', bytesToBase64(new TextEncoder().encode('foo')), 'Zm9v');
-  eq('вектор «foob»', bytesToBase64(new TextEncoder().encode('foob')), 'Zm9vYg==');
+  console.log('\n2. base64 (handing the image to the page)');
+  eq('known vector', bytesToBase64(new TextEncoder().encode('hello')), 'aGVsbG8=');
+  eq('vector "f"', bytesToBase64(new TextEncoder().encode('f')), 'Zg==');
+  eq('vector "fo"', bytesToBase64(new TextEncoder().encode('fo')), 'Zm8=');
+  eq('vector "foo"', bytesToBase64(new TextEncoder().encode('foo')), 'Zm9v');
+  eq('vector "foob"', bytesToBase64(new TextEncoder().encode('foob')), 'Zm9vYg==');
 
   const src = new Uint8Array(1024);
   for (let i = 0; i < src.length; i++) src[i] = (i * 7) % 256;
   const round = base64ToBytes(bytesToBase64(src));
   let same = round.length === src.length;
   for (let i = 0; same && i < src.length; i++) if (round[i] !== src[i]) same = false;
-  check('байты переживают кодирование и декодирование (1024)', same, { len: round.length });
+  check('bytes survive encoding and decoding (1024)', same, { len: round.length });
 
-  eq('строка тоже принимается', bytesToBase64('foo'), 'Zm9v');
-  eq('размер пустого ввода', toBytes(null).length, 0);
+  eq('a string is accepted too', bytesToBase64('foo'), 'Zm9v');
+  eq('empty input length', toBytes(null).length, 0);
 }
 
-// ───────────────────────── 3. конфигурация папки ─────────────────────────
+// ───────────────────────── 3. watch folder validation ─────────────────────────
 
 async function testConfig() {
-  console.log('\n3. проверка папки наблюдения');
+  console.log('\n3. watch folder validation');
   const path = await makeTempDir('shotmark-test-');
 
   const ok = await resolveWatchFolder(path);
-  check('существующая папка принимается', ok.ok, ok.error);
+  check('existing folder accepted', ok.ok, ok.error);
 
-  const missing = await resolveWatchFolder(path + '/нет-такой-папки');
-  check('несуществующая папка отклонена', !missing.ok, missing.error);
+  const missing = await resolveWatchFolder(path + '/no-such-folder');
+  check('missing folder rejected', !missing.ok, missing.error);
 
-  const file = path + '/файл.png';
+  const file = path + '/file.png';
   await tjs.writeFile(file, new Uint8Array([1, 2, 3]));
   const notDir = await resolveWatchFolder(file);
-  check('файл вместо папки отклонён', !notDir.ok, notDir.error);
+  check('a file instead of a folder rejected', !notDir.ok, notDir.error);
 
-  const link = path + '/ссылка';
+  const link = path + '/link';
   let symlinkMade = true;
   try { await tjs.symlink(path, link); } catch { symlinkMade = false; }
   if (symlinkMade) {
     const sym = await resolveWatchFolder(link);
-    check('симлинк отклонён', !sym.ok, sym.error);
+    check('symlink rejected', !sym.ok, sym.error);
   } else {
-    console.log('  … симлинки в этой ФС недоступны, проверка пропущена');
+    console.log('  … symlinks are unavailable on this filesystem, check skipped');
   }
 
   return path;
 }
 
-// ───────────────────────── 4. watcher целиком ─────────────────────────
+// ───────────────────────── 4. the watcher end to end ─────────────────────────
 
 async function testWatcher(base) {
-  console.log('\n4. watcher: событие, дедуп, фильтры');
+  console.log('\n4. watcher: events, dedupe, filters');
   const dir = base + '/watch';
   await tjs.makeDir(dir, { recursive: true });
 
@@ -112,42 +113,42 @@ async function testWatcher(base) {
   watcher.start();
   await sleep(300);
 
-  // валидный PNG (заголовок + мусор — содержимое для watcher'а не важно)
-  const png = joinPath(dir, 'Снимок экрана 2026-10-12.png');
+  // A valid PNG (header plus filler — the watcher does not look at the contents.)
+  const png = joinPath(dir, 'Screenshot 2026-10-12.png');
   await tjs.writeFile(png, new Uint8Array(2048).fill(7));
   await sleep(1500);
-  check('валидный PNG принят', accepted.length === 1, accepted);
+  check('valid PNG accepted', accepted.length === 1, accepted);
 
-  // повторная запись того же файла — обрабатываться не должен
+  // The same file written again must not be processed twice.
   await tjs.writeFile(png, new Uint8Array(2048).fill(9));
   await sleep(1200);
-  check('повторная запись не даёт второй обработки', accepted.length === 1, accepted);
+  check('a rewrite does not produce a second pass', accepted.length === 1, accepted);
 
-  // посторонний файл и скрытый файл
-  await tjs.writeFile(joinPath(dir, 'заметки.txt'), new Uint8Array([1]));
-  await tjs.writeFile(joinPath(dir, '.скрытый.png'), new Uint8Array([1]));
+  // A foreign file and a hidden file.
+  await tjs.writeFile(joinPath(dir, 'notes.txt'), new Uint8Array([1]));
+  await tjs.writeFile(joinPath(dir, '.hidden.png'), new Uint8Array([1]));
   await sleep(1200);
-  check('txt и скрытый PNG не принимаются', accepted.length === 1, accepted);
+  check('txt and hidden PNG are not accepted', accepted.length === 1, accepted);
 
-  // второй валидный файл
-  await tjs.writeFile(joinPath(dir, 'второй.PNG'), new Uint8Array(4096).fill(3));
+  // A second valid file.
+  await tjs.writeFile(joinPath(dir, 'second.PNG'), new Uint8Array(4096).fill(3));
   await sleep(1500);
-  check('второй валидный файл принят', accepted.length === 2, accepted);
-  check('приняты именно PNG-файлы', accepted.every((p) => /\.png$/i.test(p)), accepted);
+  check('the second valid file is accepted', accepted.length === 2, accepted);
+  check('only PNG files were accepted', accepted.every((p) => /\.png$/i.test(p)), accepted);
 
   watcher.stop();
   await sleep(200);
-  console.log('  … watcher остановлен');
+  console.log('  … watcher stopped');
 }
 
-// ───────────────────────── запуск ─────────────────────────
+// ───────────────────────── run ─────────────────────────
 
-console.log('Проверки бэкенда ShotMark (рантайм txiki.js, версия ' + tjs.version + ')');
+console.log('ShotMark backend checks (txiki.js runtime version ' + tjs.version + ')');
 testFilters();
 testBase64();
 
 const base = await testConfig();
 await testWatcher(base);
 
-console.log(`\nИтог: успешно ${passed}, провалено ${failed}`);
+console.log(`\nResult: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

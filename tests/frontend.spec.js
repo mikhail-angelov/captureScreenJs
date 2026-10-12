@@ -1,22 +1,23 @@
-// Дымовые тесты фронтенда в браузере (Playwright).
+// Frontend smoke tests in a real browser (Playwright).
 //
-//   node tests/dev-server.mjs &            # или: npm run dev-server
-//   npx playwright test                    # нужен установленный playwright
+//     npm run test:frontend
 //
-// Проверяют браузерный путь (HTTP-фолбэк) — то, что редактор открывает снимок,
-// рисует его и что оболочка приложения (полоса с папкой) на месте.
+// They cover the browser path (HTTP fallback): the editor opens a screenshot,
+// draws it, and the app shell (the folder bar) is in place. The dev servers are
+// started by playwright.config.js — port 8090 with a screenshot inside, 8091 empty.
 
 import { test, expect } from '@playwright/test';
 
 const SHOT = 'test-screenshot.png';
+const EMPTY_FOLDER_URL = 'http://127.0.0.1:8091/';
 
-test('редактор открывает переданный снимок', async ({ page }) => {
+test('the editor opens the screenshot it was given', async ({ page }) => {
   await page.goto(`/?file=${encodeURIComponent(SHOT)}`);
   await expect(page.locator('#folder-bar')).toBeVisible();
   await expect(page.locator('#btn-choose-folder')).toBeVisible();
   await expect(page.locator('#toolbar')).toBeVisible();
 
-  // Картинка загрузилась в редактор: пустое состояние скрыто, кадр активен.
+  // The image is in the editor: the empty state is hidden and the frame is active.
   await expect(page.locator('#empty-state')).toBeHidden({ timeout: 5000 });
   const loaded = await page.evaluate(() => {
     const st = window.editor && window.editor.getState();
@@ -28,13 +29,24 @@ test('редактор открывает переданный снимок', as
   expect(loaded.h).toBeGreaterThan(0);
 });
 
-test('в браузерном режиме кнопка выхода скрыта, папка показана', async ({ page }) => {
+test('without a file in the address the newest screenshot opens', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#empty-state')).toBeHidden({ timeout: 5000 });
+  const name = await page.evaluate(() => {
+    const st = window.editor && window.editor.getState();
+    return st && st.image ? st.image.fileName : null;
+  });
+  expect(name).toBe(SHOT);
+});
+
+test('an empty watch folder shows the empty state', async ({ page }) => {
+  await page.goto(EMPTY_FOLDER_URL);
+  await expect(page.locator('#empty-state')).toBeVisible();
+  await expect(page.locator('#folder-label')).toContainText('empty');
+});
+
+test('in browser mode the quit button is hidden and the folder is shown', async ({ page }) => {
   await page.goto(`/?file=${encodeURIComponent(SHOT)}`);
   await expect(page.locator('#btn-quit')).toBeHidden();
   await expect(page.locator('#folder-label')).not.toHaveText('—');
-});
-
-test('без снимка показывается пустое состояние', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.locator('#empty-state')).toBeVisible();
 });

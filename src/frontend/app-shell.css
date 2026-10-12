@@ -1,5 +1,5 @@
-/* Оболочка приложения ShotMark (порт на tinyjs):
-   полоса с папкой наблюдения, автозапуском и выходом. */
+/* ShotMark app shell (tinyjs port):
+   the watch-folder bar with launch-at-login and quit. */
 
 #folder-bar {
   display: flex;
@@ -38,7 +38,7 @@
   padding: 3px 8px;
 }
 
-/* В браузерном режиме (отладка/тесты) подсказываем, что это не приложение. */
+/* Browser mode (debugging and tests) — hint that this is not the app. */
 #folder-bar.dev { background: #fff8e1; border-bottom-color: #f0dfa0; }
 
 body.dark #folder-bar { background: #23262b; border-bottom-color: #33373d; color: #c9ced6; }

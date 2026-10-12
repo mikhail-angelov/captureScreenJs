@@ -1,85 +1,101 @@
-# ShotMark (JS) — аннотатор скриншотов на tinyjs
+# ShotMark (JS) — screenshot annotator built with tinyjs
 
-Порт macOS-приложения [captureScreen](https://github.com/mikhail-angelov/captureScreen) (Go + браузер)
-на [tinyjs](https://tinyjs.app) — нативное окно системы, бэкенд на JavaScript.
+A port of the macOS app [captureScreen](https://github.com/mikhail-angelov/captureScreen)
+(Go + a browser tab) to [tinyjs](https://tinyjs.app) — a native OS window with a
+JavaScript backend.
 
-Приложение следит за папкой скриншотов: как только там появляется новый снимок, ShotMark
-открывает его в редакторе (стрелки, текст, фигуры, маркер, блюр, кроп) — с копированием
-в буфер обмена и сохранением результата.
+The app watches a screenshot folder: as soon as a new screenshot shows up, ShotMark
+opens it in the editor (arrows, text, shapes, marker, blur, crop) with copy-to-clipboard,
+save, launch at login and a menu-bar icon.
 
-## Что изменилось против Go-версии
+## What changed compared to the Go version
 
-| | Go-версия | здесь |
+| | Go version | this repo |
 |---|---|---|
-| бэкенд | Go 1.26 + `fsnotify` + `net/http` | JS на рантайме txiki.js (внутри tinyjs) |
-| связь со страницей | HTTP на `127.0.0.1:8090` + вкладка браузера | `tiny.api` по Unix-сокету (портов нет), нативное окно |
-| открытие снимка | `open http://127.0.0.1:8090/?file=…` | окно приложения поднимается и получает картинку от бэкенда |
-| картинка в редактор | `GET /file/{slug}` | `tiny.fileURL(path)` + `"readAccess"` в конфиге (байты не идут по сокету) |
-| буфер обмена | `navigator.clipboard` в браузере | нативный `clipboard.write` (NSPasteboard) |
-| сохранение | скачивание браузером в Downloads | системный диалог сохранения + запись бэкендом |
-| автозапуск | LaunchAgent-плист + `scripts/install.sh` | `launchAtLogin` (одна функция) |
-| фон/трей | отдельный демон + вкладка | иконка в строке меню, закрытие окна не завершает приложение |
-| горячая клавиша | — | глобальная `Cmd+Alt+S` — показать окно |
-| уведомления | — | нативное уведомление о новом снимке |
-| размер/сборка | Go-тулчейн, бинарник 12,9 МБ | компилятор не нужен: esbuild + рантайм 8,5 МБ |
+| backend | Go 1.26 + `fsnotify` + `net/http` | JavaScript on the txiki.js runtime (inside tinyjs) |
+| page link | HTTP on `127.0.0.1:8090` + a browser tab | `tiny.api` over a socket (no ports), a native window |
+| opening a screenshot | `open http://127.0.0.1:8090/?file=…` | the app window comes up and gets the image from the backend |
+| image in the editor | `GET /file/{slug}` | `tiny.fileURL(path)` plus `"readAccess"` (no bytes over the socket) |
+| clipboard | `navigator.clipboard` in a browser | native `clipboard.write` (NSPasteboard) |
+| saving | the browser downloads into ~/Downloads | native save dialog plus a backend write |
+| launch at login | a LaunchAgent plist plus `scripts/install.sh` | `launchAtLogin` (one call) |
+| background | a separate daemon plus a browser tab | a menu-bar icon; closing the window does not quit |
+| hotkey | — | global `Cmd+Alt+S` brings the window up |
+| notifications | — | a native notification about a new screenshot |
+| size and build | a Go toolchain, a 12.9 MB binary | no compiler needed: esbuild plus an 8.5 MB runtime |
 
-Логика watcher'а перенесена один в один: дебаунс 500 мс, проверка стабильности размера
-(200 мс), дедуп обработанных файлов, «файл строго внутри папки», расширения `.png/.jpg/.jpeg`.
+The watcher logic is ported one-to-one: a 500 ms debounce, a size-stability check
+(200 ms), processed-file dedupe, the "file strictly inside the folder" guard and the
+`.png/.jpg/.jpeg` extensions.
 
-## Запуск
-
-```bash
-# в приложении (нужен macOS: системный WebKit)
-tinyjs dev            # разработка, горячая перезагрузка страницы
-tinyjs build          # сборка приложения
-```
-
-Папка наблюдения по умолчанию — `~/Documents` (как в оригинале) или переменная
-`CAPTURE_SCREEN_WATCH_FOLDER`. Переключается кнопкой «Папка…» — выбор идёт через
-системный диалог, папка запоминается между запусками.
-
-## Структура
-
-```
-tinyjs.json          конфиг приложения (имя, размер окна, минимальная версия tinyjs)
-src/main.js          бэкенд: api для страницы, трей, горячая клавиша, уведомления
-src/watcher.js       слежение за папкой (порт server/watcher.go)
-src/config.js        выбор и проверка папки (порт server/config.go)
-src/base64.js        передача картинки странице без внешних зависимостей
-src/frontend/        редактор (перенесён из ui/ оригинала): canvas, инструменты, экспорт
-tests/backend.test.js   проверки логики под рантаймом txiki.js
-tests/dev-server.mjs    отладочный HTTP-сервер (в приложении не используется)
-tests/frontend.spec.js  дымовые тесты страницы в браузере (Playwright)
-```
-
-## Тесты
+## Running
 
 ```bash
-tjs tests/backend.test.js      # 31 проверка: фильтры, base64, папка, watcher
-node tests/dev-server.mjs      # отладочный сервер на 127.0.0.1:8090
-npx playwright test            # тесты страницы (браузерный путь)
+# in the app (macOS: the system WebKit)
+tinyjs dev            # development, the page hot-reloads
+tinyjs build          # build the application
 ```
 
-`tjs` — рантайм из состава tinyjs (можно взять отдельно из релизов tinyjs).
-Тесты бэкенда синтетические: файлы создаются во временной папке, приложение не запускается.
+The watch folder defaults to `~/Documents` (like the original) or to the
+`CAPTURE_SCREEN_WATCH_FOLDER` environment variable. The “Folder…” button switches it
+through a native dialog and the choice is remembered between launches.
 
-## Режимы страницы
+## Layout
 
-Одна и та же страница работает двумя путями:
+```
+tinyjs.json             app config (name, window size, minimum tinyjs version)
+src/main.js             backend: the page API, tray, global hotkey, notifications
+src/watcher.js          folder watching (a port of server/watcher.go)
+src/config.js           folder selection and validation (a port of server/config.go)
+src/base64.js           handing an image to the page without dependencies
+src/frontend/           the editor (moved from the original ui/): canvas, tools, export
+scripts/get-tjs.sh      fetch the tinyjs release and verify its checksum
+scripts/run-backend-tests.sh   run the backend checks under the runtime
+tests/backend.test.js   backend checks under the txiki.js runtime
+tests/dev-server.mjs    debug HTTP server (not used by the app)
+tests/frontend.spec.js  page smoke tests in a browser (Playwright)
+```
 
-- **в приложении** — `window.tiny.api.call(...)`, события через `tiny.api.on(...)`;
-- **в браузере** (отладка и Playwright) — HTTP-фолбэк на `tests/dev-server.mjs`,
-  снимок открывается по `?file=<имя>`.
+## Tests
 
-Выбор автоматический (`src/frontend/api.js`), поэтому редактор остаётся отлаживаемым
-без запуска приложения.
+```bash
+npm ci                      # install the test dependencies
+npm run test:backend        # 31 checks: filters, base64, folder validation, watcher
+npm run test:frontend       # page tests in Chromium (starts the dev server itself)
+npm test                    # both
+```
 
-## Заметки
+`npm run test:backend` uses an existing `tjs` runtime when there is one and otherwise
+fetches the tinyjs release into `.tinyjs-cli` (checksum verified, no sudo). The backend
+tests are synthetic: files are created in a temporary folder and the app is never launched.
 
-- Картинку страница грузит сама по пути, который даёт бэкенд (`tiny.fileURL`).
-  Для этого в `tinyjs.json` включён `"readAccess": true` — вебвью получает доступ к файлам
-  на диске, иначе снимок из произвольной папки не открыть. Если `fileURL` недоступен,
-  редактор автоматически берёт байты в base64 (`readShotBase64`).
-- Приложение работает и с закрытым окном (закрытие = скрытие), снимки продолжают
-  отслеживаться, окно поднимается на новом снимке.
-- Порт **не открывается** — весь обмен идёт через сокет рантайма.
+## Continuous integration
+
+- `CI` (`.github/workflows/ci.yml`) runs on every push and pull request: backend tests,
+  Playwright tests and a full `tinyjs build`.
+- `Release` (`.github/workflows/release.yml`) runs on a `v*` tag (or manually with a tag):
+  the version is stamped into `tinyjs.json`, the macOS `.app` is built for `arm64` and
+  `x86_64`, zipped with checksums and attached to the GitHub release. Signing and
+  notarization happen only when the `TINYJS_SIGN_IDENTITY` and `TINYJS_NOTARY_PROFILE`
+  secrets are configured.
+
+## Page modes
+
+The same page runs in two ways:
+
+- **in the app** — `window.tiny.api.call(...)` and events through `tiny.api.on(...)`;
+- **in a browser** (debugging and Playwright) — the HTTP fallback against
+  `tests/dev-server.mjs`, a screenshot opened as `?file=<name>`.
+
+The switch is automatic (`src/frontend/api.js`), so the editor stays debuggable without
+launching the app.
+
+## Notes
+
+- The page loads the image from the path the backend gives it (`tiny.fileURL`), which is
+  why `"readAccess": true` is set in `tinyjs.json` — without it the webview cannot read a
+  screenshot from an arbitrary folder. If `fileURL` is unavailable the editor falls back
+  to base64 bytes (`readShotBase64`).
+- Closing the window hides it instead of quitting: screenshots keep being watched and the
+  window comes back on the next one.
+- No port is ever opened — everything goes through the runtime socket.
