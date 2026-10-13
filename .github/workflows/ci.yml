@@ -75,7 +75,13 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
+    env:
+      # Fine-grained token with contents: write on mikhail-angelov/homebrew-tap only.
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: shotmark-macos-*
@@ -90,3 +96,16 @@ jobs:
           args=(--verify-tag --generate-notes --title "ShotMark $GITHUB_REF_NAME")
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then args+=(--prerelease); fi
           gh release create "$GITHUB_REF_NAME" "${args[@]}" release/*.zip release/*.sha256
+      # Prereleases stay out of Homebrew. Skipped until the HOMEBREW_TAP_TOKEN secret exists, so a release never fails on it.
+      - name: Update Homebrew cask
+        if: env.HOMEBREW_TAP_TOKEN != '' && !contains(github.ref_name, '-')
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          git clone --depth 1 "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/mikhail-angelov/homebrew-tap.git" tap
+          node scripts/cask.mjs "$version" release > tap/Casks/shotmark.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/shotmark.rb
+          git commit -m "shotmark $version"
+          git push

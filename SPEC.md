@@ -36,4 +36,4 @@ Saving or copying marks only the exported state as saved. Cancelling the save di
 
 Download SDK v0.51.0 for the current macOS architecture into .vendor/tinyjs and verify SHA256. Build the parent and nested .app bundles using the vendor's stock tjs and JS resources. Verify the bundle signature; do not publish bare binaries.
 
-`npm test` runs backend checks in the pinned txiki.js runtime and Playwright tests on port 8091. Historical native lifecycle results are in [WINDOW_LIFECYCLE.md](WINDOW_LIFECYCLE.md). Windows/Linux, Intel, Developer ID signing, notarization, and an actual login launch have not been verified.
+`npm test` runs backend checks in the pinned txiki.js runtime and Playwright tests on port 8091. Windows/Linux, Intel, Developer ID signing, notarization, and an actual login launch have not been verified.
