@@ -9,15 +9,16 @@
 </head>
 <body>
 <div id="app">
-  <!-- Folder bar: папка наблюдения, автозапуск, выход (порт на tinyjs) -->
+  <!-- Folder bar: watch folder, launch at login, and close controls -->
   <div id="folder-bar">
     <span id="folder-label">—</span>
-    <button class="toolbar-btn" id="btn-choose-folder" title="Выбрать папку наблюдения">Папка…</button>
-    <button class="toolbar-btn" id="btn-reveal-folder" title="Показать папку в Finder">Finder</button>
-    <label class="login-wrap" id="login-wrap" title="Запускать при входе в систему">
-      <input type="checkbox" id="chk-login"> Автозапуск
+    <button class="toolbar-btn" id="btn-choose-folder" title="Choose watch folder">Folder…</button>
+    <button class="toolbar-btn" id="btn-reveal-folder" title="Reveal folder in Finder">Finder</button>
+    <button class="toolbar-btn" id="btn-history" title="Recent screenshots">History</button>
+    <label class="login-wrap" id="login-wrap" title="Launch at login">
+      <input type="checkbox" id="chk-login"> Launch at login
     </label>
-    <button class="toolbar-btn" id="btn-quit" title="Выйти из ShotMark">Выход</button>
+    <button class="toolbar-btn" id="btn-quit" title="Close editor; Watcher will keep running">Close</button>
   </div>
   <!-- Top Toolbar -->
   <div id="toolbar">
@@ -53,13 +54,13 @@
     <!-- Arrow options -->
     <div class="tool-options" data-tool="arrow">
       <label>Style:
-        <select id="arrow-style">
+        <select id="arrow-style" data-option="arrowStyle">
           <option value="solid">Solid</option>
           <option value="dashed">Dashed</option>
         </select>
       </label>
       <label>Width:
-        <input type="range" id="arrow-width" min="2" max="20" value="4">
+        <input type="range" id="arrow-width" data-option="strokeWidth" min="2" max="20" value="4">
         <span id="arrow-width-val">4</span>
       </label>
       <label>Color:
@@ -71,7 +72,7 @@
           <button class="color-swatch" style="background:#ff00ff" data-color="#ff00ff"></button>
           <button class="color-swatch" style="background:#000000" data-color="#000000"></button>
           <button class="color-swatch active" style="background:#ff0000" data-color="#ff0000"></button>
-          <input type="color" id="arrow-color-picker" value="#ff0000">
+          <input type="color" id="arrow-color-picker" data-option="color" value="#ff0000">
         </div>
       </label>
     </div>
@@ -79,29 +80,29 @@
     <!-- Text options -->
     <div class="tool-options" data-tool="text" style="display:none">
       <label>Font Size:
-        <input type="range" id="text-size" min="12" max="72" value="24">
+        <input type="range" id="text-size" data-option="fontSize" min="12" max="72" value="24">
         <span id="text-size-val">24</span>
       </label>
       <label>Color:
-        <div class="color-palette">
+        <div class="color-palette" id="text-color-palette">
           <button class="color-swatch" style="background:#ff0000" data-color="#ff0000"></button>
           <button class="color-swatch" style="background:#ffffff" data-color="#ffffff"></button>
           <button class="color-swatch active" style="background:#000000" data-color="#000000"></button>
-          <input type="color" id="text-color-picker" value="#000000">
+          <input type="color" id="text-color-picker" data-option="color" value="#000000">
         </div>
       </label>
       <label>
-        <input type="checkbox" id="text-bold"> Bold
+        <input type="checkbox" id="text-bold" data-option="bold"> Bold
       </label>
       <label>
-        <input type="checkbox" id="text-background"> Background
+        <input type="checkbox" id="text-background" data-option="background"> Background
       </label>
     </div>
 
     <!-- Shape options -->
     <div class="tool-options" data-tool="shape" style="display:none">
       <label>Shape:
-        <select id="shape-type">
+        <select id="shape-type" data-option="shapeType">
 	          <option value="rectangle">Rectangle</option>
 	          <option value="rounded-rect" selected>Rounded Rect</option>
           <option value="ellipse">Ellipse</option>
@@ -109,20 +110,20 @@
         </select>
       </label>
       <label>Stroke Width:
-        <input type="range" id="shape-stroke" min="1" max="16" value="6">
+        <input type="range" id="shape-stroke" data-option="strokeWidth" min="1" max="16" value="6">
         <span id="shape-stroke-val">6</span>
       </label>
       <label>Color:
-        <div class="color-palette">
+        <div class="color-palette" id="shape-color-palette">
           <button class="color-swatch active" style="background:#ff0000" data-color="#ff0000"></button>
           <button class="color-swatch" style="background:#00aa00" data-color="#00aa00"></button>
           <button class="color-swatch" style="background:#0000ff" data-color="#0000ff"></button>
           <button class="color-swatch" style="background:#000000" data-color="#000000"></button>
-          <input type="color" id="shape-color-picker" value="#ff0000">
+          <input type="color" id="shape-color-picker" data-option="color" value="#ff0000">
         </div>
       </label>
       <label>Fill:
-        <select id="shape-fill">
+        <select id="shape-fill" data-option="fill">
           <option value="transparent">Transparent</option>
           <option value="solid">Solid</option>
         </select>
@@ -132,21 +133,21 @@
     <!-- Marker options -->
     <div class="tool-options" data-tool="marker" style="display:none">
       <label>Width:
-        <input type="range" id="marker-width" min="4" max="40" value="18">
+        <input type="range" id="marker-width" data-option="width" min="4" max="40" value="18">
         <span id="marker-width-val">18</span>
       </label>
       <label>Opacity:
-        <input type="range" id="marker-opacity" min="0.1" max="1" step="0.05" value="0.45">
+        <input type="range" id="marker-opacity" data-option="opacity" min="0.1" max="1" step="0.05" value="0.45">
         <span id="marker-opacity-val">0.45</span>
       </label>
       <label>Color:
-        <div class="color-palette">
+        <div class="color-palette" id="marker-color-palette">
           <button class="color-swatch active" style="background:#ffff00" data-color="#ffff00"></button>
           <button class="color-swatch" style="background:#ff8800" data-color="#ff8800"></button>
           <button class="color-swatch" style="background:#ff00ff" data-color="#ff00ff"></button>
           <button class="color-swatch" style="background:#00ff00" data-color="#00ff00"></button>
           <button class="color-swatch" style="background:#00ffff" data-color="#00ffff"></button>
-          <input type="color" id="marker-color-picker" value="#ffff00">
+          <input type="color" id="marker-color-picker" data-option="color" value="#ffff00">
         </div>
       </label>
     </div>
@@ -154,7 +155,7 @@
     <!-- Blur options -->
     <div class="tool-options" data-tool="blur" style="display:none">
       <label>Blur Radius:
-        <input type="range" id="blur-radius" min="2" max="40" value="12">
+        <input type="range" id="blur-radius" data-option="radius" min="2" max="40" value="12">
         <span id="blur-radius-val">12</span>
       </label>
       <span class="tool-hint">Drag a rectangle to blur</span>
@@ -199,6 +200,11 @@
 	  </footer>
 	</div>
 
+<dialog id="shot-history">
+  <h2>Screenshot History</h2>
+  <div id="shot-list"></div>
+  <button id="history-close" type="button">Close</button>
+</dialog>
 <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -1,8 +1,4 @@
-// ShotMark App — точка входа и связывание с бэкендом.
-//
-// В приложении (tinyjs) состояние и картинки приходят от бэкенда через tiny.api,
-// новые снимки — событием newShot. В браузере (отладка/тесты) используется
-// HTTP-фолбэк и параметр ?file=<имя>.
+// Connect the editor to the native backend or the browser development server.
 
 import { call, on, inApp, hasDialogs, getFileNameFromQuery, loadScreenshot } from './api.js';
 import { Editor } from './editor.js';
@@ -11,6 +7,7 @@ const $ = (id) => document.getElementById(id);
 const DEV = !inApp();
 
 let editor = null;
+let loadRequest = 0;
 let state = { folder: null, folderError: null, lastShot: null, launchAtLogin: 'unknown' };
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -18,18 +15,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.editor = editor;
 
   wireShell();
-  await refreshState();
   subscribe();
+  await refreshState();
   await openInitial();
+  if (!DEV) {
+    const pending = await call('editorReady');
+    if (pending.lastShot && pending.lastShot !== editor.getState().image?.fileName) {
+      await openShot(pending.lastShot);
+    }
+    if (pending.requestFolder) await chooseFolder();
+    if (pending.showHistory) await showHistory();
+  }
 });
 
-// ───────────────────────── состояние ─────────────────────────
+// ───────────────────────── state ─────────────────────────
 
 async function refreshState() {
   try {
     state = Object.assign(state, await call('getState'));
   } catch (e) {
-    console.warn('не удалось получить состояние:', e.message);
+    console.warn('could not load state:', e.message);
   }
   renderShell();
 }
@@ -41,7 +46,7 @@ function renderShell() {
       label.textContent = '⚠ ' + state.folderError;
       label.classList.add('bad');
     } else {
-      label.textContent = state.folder || 'папка не выбрана';
+      label.textContent = state.folder || 'no folder selected';
       label.classList.remove('bad');
     }
   }
@@ -51,7 +56,7 @@ function renderShell() {
     const v = state.launchAtLogin;
     chk.checked = v === 'enabled';
     chk.disabled = v === 'unsupported' || v === 'unknown' || v === 'requires-approval';
-    chk.title = v === 'requires-approval' ? 'Требуется подтверждение в «Объекты входа» (системные настройки)' : '';
+    chk.title = v === 'requires-approval' ? 'Approval required in System Settings > Login Items' : '';
     const wrap = $('login-wrap');
     if (wrap) wrap.style.display = v === 'unsupported' ? 'none' : '';
   }
@@ -62,33 +67,51 @@ function renderShell() {
   }
 }
 
-// ───────────────────────── открытие снимка ─────────────────────────
+// ───────────────────────── open screenshot ─────────────────────────
 
 async function openInitial() {
-  // Приоритет: параметр в адресе (отладка/тесты) → последний снимок из бэкенда.
+  // Prefer the query parameter, then the backend's latest screenshot.
   const fromQuery = getFileNameFromQuery();
   if (fromQuery) { await openShot(fromQuery); return; }
 
   if (state.lastShot) { await openShot(state.lastShot); return; }
 
+  if (state.folderError) {
+    showEmpty('Watch folder unavailable', state.folderError);
+    return;
+  }
+
   const newest = Array.isArray(state.shots) && state.shots.length ? state.shots[0].name : null;
   if (newest) { await openShot(newest); return; }
 
-  showEmpty('Ждём скриншоты…', 'Сделайте снимок: Cmd+Shift+3 или Cmd+Shift+4');
+  showEmpty('Waiting for screenshots…', 'Take a screenshot with Cmd+Shift+3 or Cmd+Shift+4');
+}
+
+async function confirmDiscard() {
+  if (!editor.hasUnsavedChanges()) return true;
+  const message = 'You have unsaved changes. Discard them and continue?';
+  return hasDialogs() ? window.tiny.dialog.confirm(message) : window.confirm(message);
 }
 
 async function openShot(name) {
   if (!name) return;
+  if (name === editor.getState().image?.fileName) return;
+  const request = ++loadRequest;
+  if (!await confirmDiscard() || request !== loadRequest) return;
   try {
     const imageData = await loadScreenshot(name);
     if (!imageData) return;
+    if (request !== loadRequest) {
+      if (imageData.imageUrl.startsWith('blob:')) URL.revokeObjectURL(imageData.imageUrl);
+      return;
+    }
     await editor.loadImage(imageData);
     if (state.shots && !state.shots.some((s) => s.name === name)) {
-      // Снимок пришёл от события — обновим список для следующих запусков.
+      // Refresh the list after receiving a new screenshot event.
       call('listShots').then((shots) => { state.shots = shots; }).catch(() => {});
     }
   } catch (e) {
-    showEmpty('Не удалось открыть снимок', e.message);
+    if (request === loadRequest) showEmpty('Could not open screenshot', e.message);
   }
 }
 
@@ -99,18 +122,13 @@ function showEmpty(title, hint) {
   if (!el) return;
   el.style.display = '';
   el.innerHTML = `<h2>${esc(title)}</h2><p class="hint">${esc(hint)}</p>`;
-  const frame = document.querySelector('.image-frame');
+  const frame = document.getElementById('image-frame');
   if (frame) frame.classList.remove('has-image');
 }
 
-// ───────────────────────── события от бэкенда ─────────────────────────
+// ───────────────────────── backend events ─────────────────────────
 
 function subscribe() {
-  on('ready', (payload) => {
-    state = Object.assign(state, payload || {});
-    renderShell();
-  });
-
   on('newShot', async ({ name }) => {
     await openShot(name);
     await refreshState();
@@ -127,26 +145,29 @@ function subscribe() {
   });
 
   on('folderChanged', ({ folder }) => {
+    ++loadRequest;
+    editor.clearImage();
     state.folder = folder;
     state.folderError = null;
     renderShell();
     call('listShots').then((shots) => {
       state.shots = shots;
       if (shots && shots.length) openShot(shots[0].name);
-      else showEmpty('Папка выбрана', folder);
+      else showEmpty('Folder selected', folder);
     }).catch(() => {});
   });
 
   on('folderInvalid', ({ folder, error }) => {
     state.folderError = error;
     renderShell();
-    showEmpty('Папка наблюдения недоступна', `${folder}: ${error}`);
+    showEmpty('Watch folder unavailable', `${folder}: ${error}`);
   });
 
   on('requestFolder', () => { chooseFolder(); });
+  on('requestHistory', () => { showHistory(); });
 }
 
-// ───────────────────────── оболочка приложения ─────────────────────────
+// ───────────────────────── application shell ─────────────────────────
 
 function wireShell() {
   const choose = $('btn-choose-folder');
@@ -154,6 +175,9 @@ function wireShell() {
 
   const reveal = $('btn-reveal-folder');
   if (reveal) reveal.addEventListener('click', () => call('reveal', {}).catch(() => {}));
+
+  $('btn-history')?.addEventListener('click', () => showHistory());
+  $('history-close')?.addEventListener('click', () => $('shot-history').close());
 
   const quit = $('btn-quit');
   if (quit) {
@@ -177,24 +201,54 @@ function wireShell() {
 }
 
 async function chooseFolder() {
+  if (!await confirmDiscard()) return;
   let path = null;
 
   if (hasDialogs()) {
     path = await window.tiny.dialog.pickFolder();
   } else if (DEV) {
-    path = window.prompt('Папка наблюдения (режим отладки):', state.folder || '');
+    path = window.prompt('Watch folder (development mode):', state.folder || '');
   }
 
   if (!path) return;
 
   try {
     const res = await call('setFolder', { path });
+    if (DEV && res?.ok) {
+      ++loadRequest;
+      editor.clearImage();
+      await refreshState();
+      await openInitial();
+    }
     if (res && res.ok === false) {
       state.folderError = res.error;
       renderShell();
-      showEmpty('Папка не подошла', res.error);
+      showEmpty('Invalid folder', res.error);
     }
   } catch (e) {
-    showEmpty('Папка не подошла', e.message);
+    showEmpty('Invalid folder', e.message);
+  }
+}
+
+async function showHistory() {
+  const dialog = $('shot-history');
+  const list = $('shot-list');
+  try {
+    const shots = await call('listShots');
+    list.replaceChildren();
+    if (!shots.length) list.textContent = 'There are no screenshots in this folder yet.';
+    for (const shot of shots) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = shot.name;
+      button.addEventListener('click', async () => {
+        dialog.close();
+        await openShot(shot.name);
+      });
+      list.append(button);
+    }
+    if (!dialog.open) dialog.showModal();
+  } catch (error) {
+    console.warn('could not open history:', error.message);
   }
 }

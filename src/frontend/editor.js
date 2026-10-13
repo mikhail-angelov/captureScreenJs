@@ -101,7 +101,7 @@ export class Editor {
       document.getElementById('text-size-val').textContent = e.target.value;
       this.dispatch({ type: 'SET_TOOL_OPTION', key: 'fontSize', value: parseInt(e.target.value) });
     });
-    this.bindColorPicker('text-color-picker', 'text-color-picker', 'color');
+    this.bindColorPicker('text-color-palette', 'text-color-picker', 'color');
     document.getElementById('text-bold').addEventListener('change', (e) => {
       this.dispatch({ type: 'SET_TOOL_OPTION', key: 'bold', value: e.target.checked });
     });
@@ -117,7 +117,7 @@ export class Editor {
       document.getElementById('shape-stroke-val').textContent = e.target.value;
       this.dispatch({ type: 'SET_TOOL_OPTION', key: 'strokeWidth', value: parseInt(e.target.value) });
     });
-    this.bindColorPicker('shape-color-picker', 'shape-color-picker', 'color');
+    this.bindColorPicker('shape-color-palette', 'shape-color-picker', 'color');
     document.getElementById('shape-fill').addEventListener('change', (e) => {
       this.dispatch({ type: 'SET_TOOL_OPTION', key: 'fill', value: e.target.value });
     });
@@ -131,7 +131,7 @@ export class Editor {
       document.getElementById('marker-opacity-val').textContent = e.target.value;
       this.dispatch({ type: 'SET_TOOL_OPTION', key: 'opacity', value: parseFloat(e.target.value) });
     });
-    this.bindColorPicker('marker-color-picker', 'marker-color-picker', 'color');
+    this.bindColorPicker('marker-color-palette', 'marker-color-picker', 'color');
 
     // Blur options
     document.getElementById('blur-radius').addEventListener('input', (e) => {
@@ -165,22 +165,51 @@ export class Editor {
       palette.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
       swatch.classList.add('active');
       this.dispatch({ type: 'SET_TOOL_OPTION', key, value: swatch.dataset.color });
+      document.getElementById(pickerId).value = swatch.dataset.color;
     });
 
     const picker = document.getElementById(pickerId);
     if (picker) {
       picker.addEventListener('input', (e) => {
         this.dispatch({ type: 'SET_TOOL_OPTION', key, value: e.target.value });
+        palette.querySelectorAll('.color-swatch').forEach(s => {
+          s.classList.toggle('active', s.dataset.color === e.target.value);
+        });
       });
     }
   }
 
-  async loadImage(imageData) {
+  hasUnsavedChanges() {
+    const state = this.getState();
+    const text = this.toolRegistry.get('text')?.textEditor?.value.trim();
+    return !!text || !!state.crop || (state.image &&
+      (state.image !== this.savedImage || state.operations !== this.savedOperations));
+  }
+
+  markSaved(state = this.getState()) {
+    this.savedImage = state.image;
+    this.savedOperations = state.operations;
+  }
+
+  clearImage() {
+    this.toolRegistry.get('text')?.cancelText();
+    const url = this.getState().image?.imageUrl;
+    if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
     this.history.reset();
+    this.canvas.width = this.canvas.height = 1;
+    this.imageFrame.classList.remove('has-image');
+    this.render();
+    this.markSaved();
+  }
+
+  async loadImage(imageData) {
+    this.clearImage();
     this.dispatch({
       type: 'LOAD_IMAGE',
       image: imageData
     });
+
+    this.markSaved();
 
     // Show the image frame
     this.imageFrame.classList.add('has-image');
@@ -217,6 +246,8 @@ export class Editor {
     );
 
     const img = await this.createImageFromCanvas(canvas);
+    const current = this.getState();
+    if (current.image !== state.image || current.operations !== state.operations || current.crop !== state.crop) return;
     const image = {
       ...state.image,
       img,
@@ -316,12 +347,30 @@ export class Editor {
 
     // Dispatch state change
     this.dispatch({ type: 'SET_TOOL', tool: toolName });
+    this.syncToolOptions();
 
     // Activate new tool
     this.currentTool = this.toolRegistry.get(toolName);
     if (this.currentTool) {
       this.currentTool.activate();
     }
+    this.render();
+  }
+
+  syncToolOptions() {
+    const { active, options } = this.getState().tool;
+    const panel = document.querySelector(`.tool-options[data-tool="${active}"]`);
+    if (!panel) return;
+    panel.querySelectorAll('[data-option]').forEach(control => {
+      const value = options[control.dataset.option];
+      if (control.type === 'checkbox') control.checked = value;
+      else control.value = value;
+      const label = document.getElementById(control.id + '-val');
+      if (label) label.textContent = value;
+    });
+    panel.querySelectorAll('.color-swatch').forEach(swatch => {
+      swatch.classList.toggle('active', swatch.dataset.color === options.color);
+    });
   }
 
   // ── Pointer Events ──
@@ -543,7 +592,9 @@ export class Editor {
     this.render();
 
     try {
+      const exportedState = this.getState();
       await this.exporter.copyToClipboard();
+      this.markSaved(exportedState);
       this.showToast('Copied to clipboard');
     } catch (err) {
       this.dispatch({ type: 'SET_ERROR', error: err.message });
@@ -565,8 +616,12 @@ export class Editor {
     this.render();
 
     try {
-      await this.exporter.saveToFile();
-      this.showToast('Saved');
+      const exportedState = this.getState();
+      const path = await this.exporter.saveToFile();
+      if (path) {
+        this.markSaved(exportedState);
+        this.showToast('Saved');
+      }
     } catch (err) {
       this.dispatch({ type: 'SET_ERROR', error: err.message });
       this.showToast(err.message);

@@ -1,11 +1,5 @@
-// Watcher — порт server/watcher.go на рантайм txiki.js.
-// Логика сохранена один в один: fsnotify → tjs.watch, дебаунс 500 мс,
-// проверка стабильности размера (200 мс), дедуп обработанных и «файл внутри папки».
-//
-// Отличия от Go-версии:
-//  - tjs.watch отдаёт callback либо имя файла (строка), либо объект — принимаем оба вида;
-//  - фильтра создания/записи от ядра нет: те же события отсекаются дедупом и
-//    проверкой расширения/приватности (см. isValidFile).
+// Watch screenshot files with a 500 ms debounce and a 200 ms stability check.
+// Deduplicate accepted paths and retain changes received during processing.
 
 export const DEBOUNCE_MS = 500;       // WatcherDebounceDelay
 export const STABLE_CHECK_MS = 200;   // StableCheckInterval
@@ -13,7 +7,7 @@ export const SUPPORTED_EXT = ['.png', '.jpg', '.jpeg'];
 
 const log = (...a) => console.log('[watcher]', ...a);
 
-/** Размер файла в байтах или null. Понимает разные формы ответа tjs.stat. */
+/** File size in bytes, or null if unavailable. */
 export function statSize(st) {
   if (st == null) return null;
   if (typeof st === 'number') return st;
@@ -23,7 +17,7 @@ export function statSize(st) {
   return null;
 }
 
-/** Время изменения файла (мс) или 0. Учитывает форму ответа tjs.stat: mtim строкой. */
+/** Modification time in milliseconds; mtim may be a date string. */
 export function statMtime(st) {
   if (st == null) return 0;
   if (Array.isArray(st)) return st[11] ?? 0;
@@ -53,7 +47,11 @@ export function isSymlinkStat(st) {
   return false;
 }
 
-/** .png/.jpg/.jpeg и имя не с точки — как isValidFile в Go. */
+export function isRegularFileStat(st) {
+  return st != null && typeof st.mode === 'number' && (st.mode & 0o170000) === 0o100000;
+}
+
+/** Accept non-hidden PNG, JPG, and JPEG files. */
 export function isValidFile(filePath) {
   const base = String(filePath).split('/').pop();
   if (!base || base.startsWith('.')) return false;
@@ -62,7 +60,7 @@ export function isValidFile(filePath) {
   return SUPPORTED_EXT.includes(base.slice(dot).toLowerCase());
 }
 
-/** Файл строго внутри папки (защита от traversal) — isFileInsideDir. */
+/** Reject paths outside the watch folder. */
 export function isFileInsideDir(filePath, dir) {
   const norm = (p) => {
     const parts = String(p).split('/');
@@ -87,6 +85,7 @@ export class Watcher {
     this.onNewFile = onNewFile;
     this.handled = new Set();
     this.pending = new Set();
+    this.changed = new Set();
     this.handle = null;
     this.stopped = false;
   }
@@ -94,7 +93,7 @@ export class Watcher {
   isHandled(p) { return this.handled.has(p); }
   markHandled(p) { this.handled.add(p); }
 
-  /** Аналог tryStartProcessing: не берём файл дважды. */
+  /** Prevent concurrent processing and duplicate acceptance. */
   tryStartProcessing(p) {
     if (this.handled.has(p) || this.pending.has(p)) return false;
     this.pending.add(p);
@@ -103,7 +102,7 @@ export class Watcher {
 
   clearPending(p) { this.pending.delete(p); }
 
-  /** Два замера размера с интервалом — isFileSizeStable. */
+  /** Compare two file sizes separated by the stability interval. */
   async isFileSizeStable(filePath, intervalMs = STABLE_CHECK_MS) {
     let size1;
     try { size1 = statSize(await tjs.stat(filePath)); } catch { return false; }
@@ -116,19 +115,29 @@ export class Watcher {
 
   async processFile(filePath) {
     try {
-      await sleep(DEBOUNCE_MS);
-      if (this.stopped) return;
-      const stable = await this.isFileSizeStable(filePath);
-      if (!stable) { log('файл ещё не дописан, пропускаю:', filePath.split('/').pop()); return; }
-      this.markHandled(filePath);
-      log('принимаю:', filePath.split('/').pop());
-      if (this.onNewFile) this.onNewFile(filePath);
+      do {
+        this.changed.delete(filePath);
+        await sleep(DEBOUNCE_MS);
+        if (this.stopped) return;
+        const stable = await this.isFileSizeStable(filePath);
+        if (this.stopped) return;
+        if (!stable) {
+          if (this.changed.has(filePath)) continue;
+          log('file is still being written:', filePath.split('/').pop());
+          return;
+        }
+        log('accepted:', filePath.split('/').pop());
+        if (this.onNewFile) await this.onNewFile(filePath);
+        if (!this.stopped) this.markHandled(filePath);
+        return;
+      } while (!this.stopped);
     } finally {
+      this.changed.delete(filePath);
       this.clearPending(filePath);
     }
   }
 
-  /** Событие от tjs.watch: строка (имя) либо объект. */
+  /** tjs.watch may provide a filename string or an event object. */
   onEvent(a, b) {
     if (this.stopped) return;
     let name = null;
@@ -138,15 +147,16 @@ export class Watcher {
     const filePath = name.startsWith('/') ? name : this.dir.replace(/\/$/, '') + '/' + name;
     if (!isValidFile(filePath)) return;
     if (!isFileInsideDir(filePath, this.dir)) return;
+    if (this.pending.has(filePath)) { this.changed.add(filePath); return; }
     if (!this.tryStartProcessing(filePath)) return;
-    this.processFile(filePath);
+    this.processFile(filePath).catch((error) => log('processing failed:', error.message));
     void b;
   }
 
   start() {
     this.stopped = false;
     this.handle = tjs.watch(this.dir, (a, b) => this.onEvent(a, b));
-    log('слежу за папкой:', this.dir);
+    log('watching folder:', this.dir);
     return this.handle;
   }
 
@@ -156,9 +166,10 @@ export class Watcher {
       const h = this.handle;
       if (h && typeof h.close === 'function') h.close();
       else if (h && typeof h.stop === 'function') h.stop();
-    } catch (e) { log('ошибка при остановке:', e.message); }
+    } catch (e) { log('failed to stop:', e.message); }
     this.handle = null;
     this.handled.clear();
     this.pending.clear();
+    this.changed.clear();
   }
 }

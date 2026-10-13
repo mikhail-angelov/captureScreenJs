@@ -1,4 +1,5 @@
 // ShotMark Hit Testing — determine which operation was clicked
+import { getTextBounds } from './text-metrics.js';
 
 export class HitTester {
   constructor(editor) {
@@ -101,10 +102,10 @@ export class HitTester {
   }
 
   hitTestText(op, x, y) {
-    const estWidth = op.text.length * op.fontSize * 0.6;
+    const bounds = getTextBounds(op);
     const margin = 4;
-    return x >= op.x - margin && x <= op.x + estWidth + margin &&
-           y >= op.y - margin && y <= op.y + op.fontSize + margin;
+    return x >= bounds.x - margin && x <= bounds.x + bounds.width + margin &&
+           y >= bounds.y - margin && y <= bounds.y + bounds.height + margin;
   }
 
   hitTestMarker(op, x, y) {

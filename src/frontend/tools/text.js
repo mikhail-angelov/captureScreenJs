@@ -78,23 +78,26 @@ export class TextTool extends BaseTool {
 
   commitText() {
     if (!this.textEditor || !this.pendingTextOp) return;
-
-    const text = this.textEditor.value.trim();
-    if (text.length > 0) {
-      this.pendingTextOp.text = text;
-      this.editor.dispatch({ type: 'ADD_OPERATION', operation: { ...this.pendingTextOp } });
-    }
-
-    this.textEditor.remove();
+    const textarea = this.textEditor;
+    const operation = this.pendingTextOp;
+    // Removing a focused textarea fires blur synchronously. Clear the
+    // active editor first so that blur cannot commit the same text again.
     this.textEditor = null;
     this.pendingTextOp = null;
+    const text = textarea.value.trim();
+    if (text.length > 0) {
+      this.editor.dispatch({ type: 'ADD_OPERATION', operation: { ...operation, text } });
+    }
+    textarea.remove();
+    this.editor.render();
   }
 
   cancelText() {
     if (this.textEditor) {
-      this.textEditor.remove();
+      const textarea = this.textEditor;
       this.textEditor = null;
       this.pendingTextOp = null;
+      textarea.remove();
     }
   }
 

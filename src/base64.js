@@ -1,10 +1,5 @@
-// Кодирование в base64 и обратно без внешних зависимостей.
-// Нужно потому, что страница в вебвью не имеет доступа к файлам напрямую
-// (file:// ограничен своей папкой) — картинку ей передаёт бэкенд.
+// Base64 conversion for PNG export and fallback image loading.
 
-const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-/** Приводим всё, что вернул tjs.readFile, к Uint8Array. */
 export function toBytes(data) {
   if (data == null) return new Uint8Array(0);
   if (data instanceof Uint8Array) return data;
@@ -16,42 +11,18 @@ export function toBytes(data) {
 }
 
 export function bytesToBase64(input) {
-  const u8 = toBytes(input);
-  let out = '';
-  let i = 0;
-  for (; i + 2 < u8.length; i += 3) {
-    const n = (u8[i] << 16) | (u8[i + 1] << 8) | u8[i + 2];
-    out += ALPHABET[(n >> 18) & 63] + ALPHABET[(n >> 12) & 63] + ALPHABET[(n >> 6) & 63] + ALPHABET[n & 63];
+  const bytes = toBytes(input);
+  const chunks = [];
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    chunks.push(String.fromCharCode(...bytes.subarray(i, i + 0x8000)));
   }
-  const rest = u8.length - i;
-  if (rest === 1) {
-    const n = u8[i] << 16;
-    out += ALPHABET[(n >> 18) & 63] + ALPHABET[(n >> 12) & 63] + '==';
-  } else if (rest === 2) {
-    const n = (u8[i] << 16) | (u8[i + 1] << 8);
-    out += ALPHABET[(n >> 18) & 63] + ALPHABET[(n >> 12) & 63] + ALPHABET[(n >> 6) & 63] + '=';
-  }
-  return out;
+  return btoa(chunks.join(''));
 }
 
-export function base64ToBytes(b64) {
-  const clean = String(b64).replace(/^data:[^,]*,/, '').replace(/[\r\n\s]/g, '');
-  const len = clean.length;
-  const pad = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0;
-  const outLen = Math.floor((len * 3) / 4) - pad;
-  const out = new Uint8Array(outLen);
-  let acc = 0, bits = 0, o = 0;
-  for (let i = 0; i < len; i++) {
-    const c = clean[i];
-    if (c === '=') break;
-    const v = ALPHABET.indexOf(c);
-    if (v < 0) continue;
-    acc = (acc << 6) | v;
-    bits += 6;
-    if (bits >= 8) {
-      bits -= 8;
-      out[o++] = (acc >> bits) & 0xff;
-    }
-  }
-  return o === outLen ? out : out.subarray(0, o);
+export function base64ToBytes(base64) {
+  const clean = String(base64).replace(/^data:[^,]*,/, '').replace(/\s/g, '');
+  const binary = atob(clean);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }

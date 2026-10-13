@@ -1,82 +1,39 @@
-# SPEC — порт captureScreen на tinyjs
+# Specification: windowless Watcher and separate editor
 
-Источник: [mikhail-angelov/captureScreen](https://github.com/mikhail-angelov/captureScreen) (Go 1.26 + браузерный UI).
-Цель репозитория: тот же продукт, но на tinyjs — нативное окно вместо вкладки браузера, бэкенд на JS.
+The editor originates from the sibling Go project `../captureScreen`. Target platform: macOS, Tiny.js 0.51.0, txiki.js 26.6.0.
 
-## 1. Что перенесено
+## Processes
 
-| Оригинал | Здесь | Статус |
-|---|---|---|
-| `server/watcher.go` (fsnotify, debounce 500 мс, stability 200 мс, дедуп, path guard) | `src/watcher.js` | 1:1, проверено тестами |
-| `server/config.go` (`~`, env, проверка папки, симлинки) | `src/config.js` | 1:1, проверено тестами |
-| `ui/*` (редактор, инструменты, экспорт) | `src/frontend/*` | перенесён; изменены только транспорт и сохранение/буфер |
-| `GET /file/{slug}` | `tiny.fileURL(path)` + `api.readShot`; base64 — запасной путь | заменено |
-| HTTP-сервер `127.0.0.1:8090` | `tiny.api` (сокет) | выброшен |
-| `open http://…?file=` | окно приложения + `app.push('newShot')` | заменено |
-| `server/os_integration.go` (OpenUrl) | `app.show()` / `app.shell.open` | заменено |
-| LaunchAgent + `install.sh` | `app.launchAtLogin` | заменено |
-| `navigator.clipboard` (браузер) | `app.clipboard.write({ image })` | нативно |
-| скачивание браузером | `tiny.dialog.saveFile()` + `api.savePng` | нативно |
+The main `ShotMark.app` uses `backend: src/agent.js`, `mainWindow: false`, and `activation: accessory`. Its launcher owns a native menu bar icon; its backend owns file observation and settings. No hidden service window or WebView is created. Closing the editor does not terminate the agent.
 
-Добавлено (то, чего в оригинале не было): иконка в строке меню, глобальная клавиша
-`Cmd+Alt+S`, уведомление о новом снимке, работа при закрытом окне, панель папки в окне.
+`Contents/Resources/ShotMark Editor.app` is a separate Tiny.js application with `src/main.js` as its backend and a 1180×820 main window. `setHideOnClose(false)` terminates the editor when the window closes, releasing its entire WebKit session.
 
-## 2. API бэкенда
+New screenshots use `/usr/bin/open -a <editor bundle> --env SHOTMARK_DATA_DIR=... <path>`. LaunchServices starts the editor or sends files to its running instance. `onOpenFiles` accepts supported images and ignores unrelated arguments. Image names are retained until the page is ready.
 
-`getState`, `listShots`, `readShot`, `setFolder`, `savePng`, `copyImage`, `reveal`,
-`openFolder`, `getLaunchAtLogin`, `setLaunchAtLogin`, `quit`.
-События странице: `ready`, `newShot`, `openShot`, `newestShot`, `folderChanged`,
-`folderInvalid`, `requestFolder`.
+Menu bar commands open the editor, history, or folder settings through `shotmark-editor://editor|history|settings`. URLs work on cold startup and in a running editor. Before page readiness, actions are returned by `editorReady`; afterwards, they are delivered as page events. History lists the newest 50 regular supported images in the selected folder.
 
-Трей: «Показать окно», «Выбрать папку…», «Последний снимок», «Выход».
+A manually opened editor starts the agent if absent, independently of whether its initial folder is available. Singleton ownership uses a Unix socket. Probes await an acknowledgement before disconnecting to avoid txiki.js getpeername failures. Stop Watcher stops observation and terminates the agent while leaving an open editor available.
 
-## 3. Что проверено (и на чём)
+## Settings and files
 
-Проведено на Linux (мини-ПК), рантайм txiki.js v26.6.0 из релиза tinyjs, бинарник сверен по `checksums.txt`.
+The watch folder is stored in settings.json, separately from the runtime store. Without a usable saved preference, use `CAPTURE_SCREEN_WATCH_FOLDER`, then `~/Documents`. Normalize and save the folder before launching the first editor. The watcher follows saved-folder changes without restarting. Invalid new selections preserve the previous folder; an unavailable initial folder leaves the agent and settings menu available.
 
-- **Логика бэкенда — 31 проверка, 0 падений** (`tjs tests/backend.test.js`):
-  фильтры расширений и имён; path guard (`../` наружу отклонён); base64 (векторы + round-trip 1024 байта);
-  папка: существует/не существует/файл вместо папки/симлинк; watcher целиком: приём валидного PNG,
-  отсутствие повторной обработки, отказ для `.txt` и скрытых файлов, второй файл принимается.
-- **Страница в браузере (браузерный путь)** — живой Chromium: полоса папки, тулбар,
-  загрузка снимка 1000×600 через `/file/`, пустое состояние.
-- **Страница в режиме приложения** (заглушка `window.tiny`): старт по данным бэкенда,
-  картинка пришла двумя путями — по `tiny.fileURL(path)` (основной, байты по сокету не идут)
-  и через base64-фолбэк (`readShotBase64` → blob-url), в обоих случаях снимок 1000×600
-  загружен в редактор; все 7 обработчиков событий зарегистрированы, событие `newShot`
-  переключило снимок, кнопки Copy и Save вызвали `copyImage` и `savePng` с реальным PNG
-  (префикс `iVBORw0KGgo`), ошибок в консоли нет.
-- **Сборка штатным инструментом**: `tinyjs build` (v0.50.1, бинарники сверены по `checksums.txt`)
-  собрал `dist/shotmark` (backend, 8,3 МБ) и `dist/launcher` (1,2 МБ) без ошибок.
-- **Имена методов бэкенда** сверены по исходнику рантайма (`runtime/tiny.js`): `setHideOnClose`,
-  `hotkey.register`, `tray.set`, `launchAtLogin`, `store`, `shell`, `clipboard`, `notify`,
-  `show`, `quit`, `push` — все существуют.
-- **Синтаксис** всех 22 модулей (`node --check`), валидность `tinyjs.json`.
+Await realPath. Frontend filenames must not contain path components. Accept only regular, non-hidden PNG/JPG/JPEG files and reject symlinks and directories. Debounce for 500 ms and check file-size stability over 200 ms. Retain changes received during processing and recheck before acceptance. Deduplicate accepted paths; callback failure must not mark acceptance. Cancel pending work after stopping, including work resuming from asynchronous validation.
 
-## 4. Что НЕ проверено (честно)
+Launch at login uses a user LaunchAgent with RunAtLoad and the executable of the main windowless bundle. Changes take effect at the next login and do not stop the current agent. Report errors when disabling the setting fails, except when the plist is already absent. Plist presence is the configured state; it does not prove system approval or a successful login launch.
 
-Проверки требуют macOS с системным WebKit — на мини-ПК окно поднять нечем (нет дисплея и `libwebkit2gtk`):
+## Editor
 
-- запуск окна `tinyjs dev` и сборка `tinyjs build`;
-- нативные вызовы: `app.show()`, трей, глобальная клавиша, уведомление, `clipboard.write`,
-  `dialog.pickFolder/saveFile`, `launchAtLogin`;
-- что `"readAccess": true` действительно открывает вебвью доступ к снимкам из произвольной
-  папки (на Linux окно не поднять) — если нет, сработает base64-фолбэк, но это дороже по трафику;
-- поведение при закрытом окне (наблюдение должно продолжаться).
+Replacing a screenshot or changing folders requires confirmation when there are unsaved changes. A stale load or crop must not replace a newer image or restore stale annotations. Release blob URLs on image replacement, clearing, and errors.
 
-## 5. Найденные грабли рантайма
+Tool controls must reflect the active options, including after switching tools or loading a new image. Color swatches must update the active tool. Committing text must redraw it immediately. Text hit-testing and selection use the rendered baseline and measured glyph bounds.
 
-- `tjs.makeTempDir()` / `tjs.makeTempFile()` в этой сборке падают с `EINVAL` при любых
-  аргументах — временный путь для буфера обмена строится вручную в `tjs.tmpDir`.
-- `tjs.stat` отдаёт время изменения как `mtim` (строкой), а не `mtime` — учтено в `statMtime`.
-- `tjs.readDir` возвращает асинхронный итератор, `tjs.readFile` — `Uint8Array`.
-- `tjs.watch(dir, cb)`: callback получает имя файла; объект-хендл имеет `close()`.
+PNG export and clipboard output must agree with the preview's shape opacity and blur-region geometry. Clip blur operations to the visible image bounds, including negative coordinates after cropping.
 
-## 6. Дальше
+Saving or copying marks only the exported state as saved. Cancelling the save dialog preserves unsaved status. Send base64 PNG directly to the clipboard without a temporary file. Annotation history stays in the editor and is discarded when that process exits.
 
-1. Прогнать `tinyjs dev` на маке: окно, трей, диалоги, автозапуск.
-2. Замерить память приложения в состояниях «окно открыто / скрыто / закрыто».
-3. Подпись и нотаризация: `signIdentity`/`notarize` в `tinyjs.json` или `TINYJS_SIGN_IDENTITY`.
-4. Опционально: `captureScreen()` — снимать экран самим, не завися от папки Яндекс.Диска
-   (потребует разрешения «Запись экрана»); `ocr(path)` — текст со снимка.
-5. Отдельной веткой: лицензия репозитория (сейчас нет).
+## Distribution and verification
+
+Download SDK v0.51.0 for the current macOS architecture into .vendor/tinyjs and verify SHA256. Build the parent and nested .app bundles using the vendor's stock tjs and JS resources. Verify the bundle signature; do not publish bare binaries.
+
+`npm test` runs backend checks in the pinned txiki.js runtime and Playwright tests on port 8091. Historical native lifecycle results are in [WINDOW_LIFECYCLE.md](WINDOW_LIFECYCLE.md). Windows/Linux, Intel, Developer ID signing, notarization, and an actual login launch have not been verified.

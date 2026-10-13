@@ -1,6 +1,7 @@
 // ShotMark Export — final PNG rendering and clipboard/save
 
 import { getTextFont, measureTextWidth } from './text-metrics.js';
+import { renderBlurRegion } from './blur-render.js';
 import { call, inApp, hasDialogs } from './api.js';
 
 export class Exporter {
@@ -49,40 +50,10 @@ export class Exporter {
     return canvas;
   }
 
-  renderBlurToCanvas(ctx, state, offsetX, offsetY, outW, outH) {
-    state.operations.forEach(op => {
-      if (op.type !== 'blur') return;
-
-      // Clip to visible area
-      const bx = op.x - offsetX;
-      const by = op.y - offsetY;
-      const bw = op.width;
-      const bh = op.height;
-
-      if (bx + bw <= 0 || by + bh <= 0 || bx >= outW || by >= outH) return;
-
-      const clipX = Math.max(0, bx);
-      const clipY = Math.max(0, by);
-      const clipW = Math.min(bw, outW - clipX);
-      const clipH = Math.min(bh, outH - clipY);
-
-      if (clipW <= 0 || clipH <= 0) return;
-
-      // Blur the full current image, then copy only the selected region.
-      // This matches the live preview and keeps neighboring pixels available at edges.
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = outW;
-      tempCanvas.height = outH;
-      const tempCtx = tempCanvas.getContext('2d');
-
-      tempCtx.save();
-      tempCtx.filter = `blur(${op.radius}px)`;
-      tempCtx.drawImage(ctx.canvas, 0, 0, outW, outH);
-      tempCtx.restore();
-
-      const blurredData = tempCtx.getImageData(clipX, clipY, clipW, clipH);
-      ctx.putImageData(blurredData, clipX, clipY);
-    });
+  renderBlurToCanvas(ctx, state, offsetX, offsetY) {
+    for (const op of state.operations) {
+      if (op.type === 'blur') renderBlurRegion(ctx, op, offsetX, offsetY);
+    }
   }
 
   renderMarkersToCanvas(ctx, state, offsetX, offsetY) {
@@ -182,7 +153,6 @@ export class Exporter {
 
     if (op.fill === 'solid') {
       ctx.fillStyle = op.stroke;
-      ctx.globalAlpha = 0.2;
     }
 
     ctx.beginPath();
@@ -207,7 +177,11 @@ export class Exporter {
         return;
     }
 
-    if (op.fill === 'solid') ctx.fill();
+    if (op.fill === 'solid') {
+      ctx.globalAlpha = 0.2;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
     ctx.stroke();
     ctx.restore();
   }
@@ -232,8 +206,8 @@ export class Exporter {
     ctx.restore();
   }
 
-  // Copy final image to clipboard: в приложении — нативно (NSPasteboard),
-  // в браузере — как раньше, через navigator.clipboard.
+  // Copy final image to clipboard: use the native clipboard in the app,
+  // or navigator.clipboard in browser mode.
   async copyToClipboard() {
     const canvas = this.renderFinalImage();
     if (!canvas) throw new Error('No image to copy');
@@ -255,8 +229,8 @@ export class Exporter {
     }
   }
 
-  // Save final image: в приложении — системный диалог сохранения и запись через
-  // бэкенд; в браузере — как раньше, скачиванием файла.
+  // Save final image: use the native save dialog and backend writer,
+  // or download a file in browser mode.
   async saveToFile() {
     const canvas = this.renderFinalImage();
     if (!canvas) throw new Error('No image to save');
@@ -269,12 +243,12 @@ export class Exporter {
       let dest = null;
       if (hasDialogs()) {
         try {
-          dest = await window.tiny.dialog.saveFile({ name: fileName, types: ['png'] });
+          dest = await window.tiny.dialog.saveFile({ types: ['png'] });
         } catch (e) {
           dest = await window.tiny.dialog.saveFile();
         }
       }
-      if (!dest) return null; // пользователь отменил
+      if (!dest) return null; // user cancelled
       await call('savePng', { path: dest, dataBase64 });
       return dest;
     }

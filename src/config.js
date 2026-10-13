@@ -1,6 +1,5 @@
-// Конфигурация — порт server/config.go.
-// Папка наблюдения: переменная окружения CAPTURE_SCREEN_WATCH_FOLDER,
-// иначе ~/Documents. Валидация: существует, это папка, не симлинк.
+// Watch folder: saved preference, CAPTURE_SCREEN_WATCH_FOLDER, or ~/Documents.
+// Validate a real directory and reject symlinks.
 
 import { isDirStat, isSymlinkStat } from './watcher.js';
 
@@ -24,7 +23,7 @@ export function baseName(p) {
   return String(p).split('/').filter(Boolean).pop() || '';
 }
 
-/** Имя файла без путей — то, что можно принимать от страницы. */
+/** Only accept plain filenames from the frontend. */
 export function isSafeName(name) {
   if (typeof name !== 'string' || !name) return false;
   if (name.includes('/') || name.includes('\\')) return false;
@@ -32,9 +31,9 @@ export function isSafeName(name) {
   return true;
 }
 
-/** Проверка и нормализация папки. Возвращает { ok, path, error }. */
+/** Validate and normalize a directory. Returns { ok, path, error }. */
 export async function resolveWatchFolder(dir) {
-  if (!dir || typeof dir !== 'string') return { ok: false, path: '', error: 'папка не задана' };
+  if (!dir || typeof dir !== 'string') return { ok: false, path: '', error: 'no folder specified' };
   const expanded = expandTilde(dir);
   let abs = expanded;
   if (!abs.startsWith('/')) abs = joinPath(tjs.cwd, abs);
@@ -43,16 +42,18 @@ export async function resolveWatchFolder(dir) {
   try {
     st = await tjs.lstat(abs);
   } catch (e) {
-    return { ok: false, path: abs, error: `папка не существует: ${abs}` };
+    return { ok: false, path: abs, error: `folder does not exist: ${abs}` };
   }
-  if (isSymlinkStat(st)) return { ok: false, path: abs, error: `папка — симлинк, не поддерживается: ${abs}` };
-  if (!isDirStat(st)) return { ok: false, path: abs, error: `это не папка: ${abs}` };
+  if (isSymlinkStat(st)) return { ok: false, path: abs, error: `symlink folders are not supported: ${abs}` };
+  if (!isDirStat(st)) return { ok: false, path: abs, error: `not a directory: ${abs}` };
 
-  try { abs = tjs.realPath(abs); } catch { /* оставляем как есть */ }
+  try { abs = await tjs.realPath(abs); } catch (error) {
+    return { ok: false, path: abs, error: `could not resolve folder: ${error.message}` };
+  }
   return { ok: true, path: abs, error: null };
 }
 
-/** Папка по умолчанию: env, иначе ~/Documents. */
+/** Default folder: environment override or ~/Documents. */
 export function defaultWatchFolder() {
   const env = tjs.env[ENV_DIR];
   return env && String(env).trim() ? String(env).trim() : DEFAULT_DIR;

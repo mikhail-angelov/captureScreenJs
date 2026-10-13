@@ -1,6 +1,7 @@
 // ShotMark Rendering — canvas for image, SVG for annotations
 
-import { measureTextWidth } from './text-metrics.js';
+import { measureTextWidth, getTextBounds } from './text-metrics.js';
+import { renderBlurRegion } from './blur-render.js';
 
 export class Renderer {
   constructor(editor) {
@@ -45,6 +46,12 @@ export class Renderer {
     ctx.clearRect(0, 0, w, h);
     ctx.drawImage(state.image.img, 0, 0, w, h);
 
+    // Draw blur operations directly on canvas (they need pixel manipulation)
+    this.renderBlurOps(state, ctx);
+
+    // Draw marker operations (semi-transparent, drawn on canvas)
+    this.renderMarkerOps(state, ctx);
+
     // Apply crop visual
     if (state.crop) {
       // Dim outside the crop area
@@ -58,41 +65,13 @@ export class Renderer {
       // Right
       ctx.fillRect(state.crop.x + state.crop.width, state.crop.y, w - state.crop.x - state.crop.width, state.crop.height);
     }
-
-    // Draw blur operations directly on canvas (they need pixel manipulation)
-    this.renderBlurOps(state, ctx);
-
-    // Draw marker operations (semi-transparent, drawn on canvas)
-    this.renderMarkerOps(state, ctx);
   }
 
   // Render blur operations using canvas filter
   renderBlurOps(state, ctx) {
-    const w = state.image.width;
-    const h = state.image.height;
-
-    state.operations.forEach(op => {
-      if (op.type !== 'blur') return;
-
-      // Create a temporary canvas for the blurred region
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = w;
-      tempCanvas.height = h;
-      const tempCtx = tempCanvas.getContext('2d');
-
-      // Draw the original image region
-      tempCtx.drawImage(state.image.img, 0, 0, w, h);
-
-      // Apply blur filter
-      tempCtx.save();
-      tempCtx.filter = `blur(${op.radius}px)`;
-      tempCtx.drawImage(tempCanvas, 0, 0, w, h);
-      tempCtx.restore();
-
-      // Copy the blurred region back to main canvas
-      const imageData = tempCtx.getImageData(op.x, op.y, op.width, op.height);
-      ctx.putImageData(imageData, op.x, op.y);
-    });
+    for (const op of state.operations) {
+      if (op.type === 'blur') renderBlurRegion(ctx, op);
+    }
   }
 
   // Render marker operations (freehand strokes)
@@ -294,8 +273,7 @@ export class Renderer {
       case 'blur':
         return { x: op.x, y: op.y, width: op.width, height: op.height };
       case 'text':
-        const estWidth = op.text.length * op.fontSize * 0.6;
-        return { x: op.x, y: op.y - op.fontSize, width: estWidth + 20, height: op.fontSize + 10 };
+        return getTextBounds(op);
       case 'marker':
         const xs = op.points.map(p => p.x);
         const ys = op.points.map(p => p.y);

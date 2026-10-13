@@ -1,85 +1,93 @@
-# ShotMark (JS) — аннотатор скриншотов на tinyjs
+# ShotMark
 
-Порт macOS-приложения [captureScreen](https://github.com/mikhail-angelov/captureScreen) (Go + браузер)
-на [tinyjs](https://tinyjs.app) — нативное окно системы, бэкенд на JavaScript.
+A native macOS screenshot annotator built with [Tiny.js](https://github.com/tarwin/tinyjsapp), ported from [captureScreen](https://github.com/mikhail-angelov/captureScreen).
 
-Приложение следит за папкой скриншотов: как только там появляется новый снимок, ShotMark
-открывает его в редакторе (стрелки, текст, фигуры, маркер, блюр, кроп) — с копированием
-в буфер обмена и сохранением результата.
+ShotMark watches a folder for PNG, JPG, and JPEG screenshots and opens an editor with arrows, text, shapes, markers, blur, crop, undo/redo, PNG export, and clipboard copy.
 
-## Что изменилось против Go-версии
+## Build and run
 
-| | Go-версия | здесь |
-|---|---|---|
-| бэкенд | Go 1.26 + `fsnotify` + `net/http` | JS на рантайме txiki.js (внутри tinyjs) |
-| связь со страницей | HTTP на `127.0.0.1:8090` + вкладка браузера | `tiny.api` по Unix-сокету (портов нет), нативное окно |
-| открытие снимка | `open http://127.0.0.1:8090/?file=…` | окно приложения поднимается и получает картинку от бэкенда |
-| картинка в редактор | `GET /file/{slug}` | `tiny.fileURL(path)` + `"readAccess"` в конфиге (байты не идут по сокету) |
-| буфер обмена | `navigator.clipboard` в браузере | нативный `clipboard.write` (NSPasteboard) |
-| сохранение | скачивание браузером в Downloads | системный диалог сохранения + запись бэкендом |
-| автозапуск | LaunchAgent-плист + `scripts/install.sh` | `launchAtLogin` (одна функция) |
-| фон/трей | отдельный демон + вкладка | иконка в строке меню, закрытие окна не завершает приложение |
-| горячая клавиша | — | глобальная `Cmd+Alt+S` — показать окно |
-| уведомления | — | нативное уведомление о новом снимке |
-| размер/сборка | Go-тулчейн, бинарник 12,9 МБ | компилятор не нужен: esbuild + рантайм 8,5 МБ |
+Requires macOS, Node.js, and the system `tar` and `codesign` commands. The build downloads the official Tiny.js **0.51.0** SDK for the architecture of the current Node.js process and verifies its archive against the vendor's SHA256 checksums. Global `tinyjs` and `tjs` installations are not required. ARM64 has been tested; Intel has not.
 
-Логика watcher'а перенесена один в один: дебаунс 500 мс, проверка стабильности размера
-(200 мс), дедуп обработанных файлов, «файл строго внутри папки», расширения `.png/.jpg/.jpeg`.
-
-## Запуск
-
-```bash
-# в приложении (нужен macOS: системный WebKit)
-tinyjs dev            # разработка, горячая перезагрузка страницы
-tinyjs build          # сборка приложения
+```sh
+npm ci
+npm run build
+open dist/ShotMark.app
 ```
 
-Папка наблюдения по умолчанию — `~/Documents` (как в оригинале) или переменная
-`CAPTURE_SCREEN_WATCH_FOLDER`. Переключается кнопкой «Папка…» — выбор идёт через
-системный диалог, папка запоминается между запусками.
+For terminal use, `npm run watch` starts the built application. `npm run dev` builds it first and then starts it.
 
-## Структура
+Distribute the complete **`dist/ShotMark.app`** bundle, including its nested editor. The editor depends on its parent bundle for starting the agent and configuring launch at login. Close the running copy before rebuilding it.
 
-```
-tinyjs.json          конфиг приложения (имя, размер окна, минимальная версия tinyjs)
-src/main.js          бэкенд: api для страницы, трей, горячая клавиша, уведомления
-src/watcher.js       слежение за папкой (порт server/watcher.go)
-src/config.js        выбор и проверка папки (порт server/config.go)
-src/base64.js        передача картинки странице без внешних зависимостей
-src/frontend/        редактор (перенесён из ui/ оригинала): canvas, инструменты, экспорт
-tests/backend.test.js   проверки логики под рантаймом txiki.js
-tests/dev-server.mjs    отладочный HTTP-сервер (в приложении не используется)
-tests/frontend.spec.js  дымовые тесты страницы в браузере (Playwright)
-```
+## How it works
 
-## Тесты
+1. The main application starts a folder watcher and a native menu bar icon without creating a window or WebView.
+2. A new screenshot opens the nested `ShotMark Editor.app` through LaunchServices. Subsequent screenshots go to the existing editor. Replacing an image or changing folders requires confirmation when there are unsaved changes.
+3. Closing the editor terminates its backend, launcher, and WebKit session. The menu bar agent keeps watching.
+4. The next screenshot starts a fresh editor process.
 
-```bash
-tjs tests/backend.test.js      # 31 проверка: фильтры, base64, папка, watcher
-node tests/dev-server.mjs      # отладочный сервер на 127.0.0.1:8090
-npx playwright test            # тесты страницы (браузерный путь)
+The menu bar includes **Open Editor**, **Screenshot History**, **Settings**, and **Stop Watcher**. History lists the 50 most recent supported images. Stopping Watcher leaves an open editor available to finish your work. A Unix socket prevents duplicate agents. Opening the nested editor manually also starts the agent if needed, even when the configured folder is unavailable.
+
+## Watch folder
+
+The selected folder is saved in:
+
+```text
+~/Library/Application Support/com.mikhailangelov.shotmark/settings.json
 ```
 
-`tjs` — рантайм из состава tinyjs (можно взять отдельно из релизов tinyjs).
-Тесты бэкенда синтетические: файлы создаются во временной папке, приложение не запускается.
+Without a usable saved preference, ShotMark uses `CAPTURE_SCREEN_WATCH_FOLDER`, then `~/Documents`. The watcher follows folder changes without restarting. Invalid selections preserve the previous folder. An unavailable initial folder leaves the menu bar agent available so you can choose another folder.
 
-## Режимы страницы
+Only regular, non-hidden PNG/JPG/JPEG files are accepted; symlinks and directories are rejected. Processing waits 500 ms and compares file sizes 200 ms apart. Changes received during processing trigger another check. Accepted paths are deduplicated for the watcher session; a failed callback does not mark a file as accepted.
 
-Одна и та же страница работает двумя путями:
+## Launch at login
 
-- **в приложении** — `window.tiny.api.call(...)`, события через `tiny.api.on(...)`;
-- **в браузере** (отладка и Playwright) — HTTP-фолбэк на `tests/dev-server.mjs`,
-  снимок открывается по `?file=<имя>`.
+The editor's **Launch at login** checkbox creates a user LaunchAgent for the main windowless application, including its menu bar icon. It takes effect at the next macOS login and does not stop the current agent when disabled. `src/launch-at-login.js` implements this setting; it does not handle authentication. The checkbox reflects the presence of its plist, not a verified macOS permission or successful login launch.
 
-Выбор автоматический (`src/frontend/api.js`), поэтому редактор остаётся отлаживаемым
-без запуска приложения.
+## Development and tests
 
-## Заметки
+```sh
+npm test
+```
 
-- Картинку страница грузит сама по пути, который даёт бэкенд (`tiny.fileURL`).
-  Для этого в `tinyjs.json` включён `"readAccess": true` — вебвью получает доступ к файлам
-  на диске, иначе снимок из произвольной папки не открыть. Если `fileURL` недоступен,
-  редактор автоматически берёт байты в base64 (`readShotBase64`).
-- Приложение работает и с закрытым окном (закрытие = скрытие), снимки продолжают
-  отслеживаться, окно поднимается на новом снимке.
-- Порт **не открывается** — весь обмен идёт через сокет рантайма.
+The backend suite runs in txiki.js from the pinned SDK. Playwright runs the browser suite with a development server on port 8091. You can run either suite with `npm run test:backend` or `npm run test:frontend`.
+
+For manual browser development:
+
+```sh
+PORT=8091 npm run dev-server
+```
+
+The development server uses `tests/` as its screenshot folder by default; set `SHOT_FOLDER` to use another folder. It is not part of the packaged application.
+
+## CI and macOS releases
+
+[GitHub Actions](.github/workflows/ci.yml) runs `npm ci`, installs Playwright Chromium, runs `npm test`, builds the application, and packages it on native Apple Silicon and Intel macOS runners. Pushes and pull requests run these checks; manual workflow runs are also available. Successful builds upload ZIP archives and SHA256 files as workflow artifacts.
+
+To publish a release, set `version` in `tinyjs.json`, commit the changes, then create and push the matching tag. For version 1.0.0:
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Tag builds reject a version mismatch. After both architectures pass, the workflow creates a GitHub release with generated notes and these downloads:
+
+- `ShotMark-1.0.0-macos-arm64.zip` for Apple Silicon.
+- `ShotMark-1.0.0-macos-x86_64.zip` for Intel.
+- A `.sha256` checksum file for each archive.
+
+Tags with a prerelease suffix, such as `v1.1.0-beta.1`, create prereleases. Only the release job gets permission to write repository contents; it uses GitHub's automatic token and requires no additional secrets. Releases are ad-hoc signed, without Developer ID signing or notarization, so macOS may require approval before opening a downloaded app.
+
+For a local package, run `npm run build` followed by `npm run package`. Output goes to `release/`. Extract the ZIP, move the complete ShotMark.app bundle to Applications, and open it. Verify a download from the directory containing both files with `shasum -a 256 -c ShotMark-1.0.0-macos-arm64.zip.sha256` (use the Intel filename for Intel downloads).
+
+## Project layout
+
+- `src/agent.js`: windowless backend and native menu bar commands.
+- `src/daemon.js`, `src/watcher.js`: singleton coordination and file observation.
+- `src/main.js`: editor backend, files, export, settings, and open-file/URL events.
+- `src/processes.js`: parent agent and nested editor paths.
+- `src/settings.js`, `src/launch-at-login.js`: persisted folder and login launch configuration.
+- `src/frontend/`: editor UI, annotation tools, history, and shared rendering calculations.
+- `scripts/tinyjs.mjs`, `scripts/build.mjs`, `scripts/package.mjs`: pinned SDK, two-bundle build, and release packaging.
+
+The background agent uses two processes. Earlier native measurements found approximately 17–18 MiB of combined physical footprint without an editor. See [WINDOW_LIFECYCLE.md](WINDOW_LIFECYCLE.md) for measurement conditions, [SPEC.md](SPEC.md) for behavior, and [FULL_REVIEW.md](FULL_REVIEW.md) for the review and fixes. These measurements do not establish current performance on other machines. Windows/Linux, Developer ID signing, notarization, and a real login launch have not been verified.

@@ -11,3 +11,14 @@ export function measureTextWidth(op) {
   measureCtx.font = getTextFont(op);
   return measureCtx.measureText(op.text).width;
 }
+
+export function getTextBounds(op) {
+  measureCtx.font = getTextFont(op);
+  const metrics = measureCtx.measureText(op.text);
+  return {
+    x: op.x - metrics.actualBoundingBoxLeft,
+    y: op.y - metrics.actualBoundingBoxAscent,
+    width: metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight,
+    height: metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent,
+  };
+}
